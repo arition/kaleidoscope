@@ -176,6 +176,8 @@ function isClipMetadata(value: unknown): value is ClipMetadata {
     isPositiveInteger(value.source_height) &&
     isPositiveInteger(value.output_width) &&
     isPositiveInteger(value.output_height) &&
+    value.output_width === value.source_width &&
+    value.output_height === value.source_height &&
     Array.isArray(value.warnings) &&
     value.warnings.every(isClipWarning)
   );

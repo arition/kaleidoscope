@@ -99,7 +99,9 @@ def make_config(
         active_clip_ids=active_clip_ids,
         overlay_opacity=0.5,
         max_visible_clips=4,
+        codec="jpeg",
         quality=80,
+        lossless=False,
         cache_size=32,
         max_in_flight=4,
         autoplay=False,
@@ -157,6 +159,51 @@ def test_single_frame_request_is_async_encoded_and_releases_the_frame() -> None:
             [b"encoded:\x0c\x228"],
         )
     ]
+
+
+def test_session_uses_configured_webp_lossless_encoder() -> None:
+    node = FakeVideoNode()
+    frame = FakeFrame()
+    config = make_config(node)
+    config = PreviewConfig(
+        clips=config.clips,
+        num_frames=config.num_frames,
+        fps=config.fps,
+        mode=config.mode,
+        primary=config.primary,
+        secondary=config.secondary,
+        active_clip_ids=config.active_clip_ids,
+        overlay_opacity=config.overlay_opacity,
+        max_visible_clips=config.max_visible_clips,
+        codec="webp",
+        quality=100,
+        lossless=True,
+        cache_size=config.cache_size,
+        max_in_flight=config.max_in_flight,
+        autoplay=config.autoplay,
+    )
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=config,
+        send=lambda message, buffers: sent.append((message, buffers)),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=7,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(frame)
+
+    message, buffers = sent[0]
+    frames = message["frames"]
+    assert isinstance(frames, list)
+    assert frames[0]["mime"] == "image/webp"
+    assert buffers[0].startswith(b"RIFF")
+    assert buffers[0][8:12] == b"WEBP"
 
 
 def test_frame_set_waits_for_every_clip_and_preserves_requested_order() -> None:
@@ -463,7 +510,9 @@ def test_lazy_fallback_render_failure_reports_conversion_failed() -> None:
         active_clip_ids=config.active_clip_ids,
         overlay_opacity=config.overlay_opacity,
         max_visible_clips=config.max_visible_clips,
+        codec=config.codec,
         quality=config.quality,
+        lossless=config.lossless,
         cache_size=config.cache_size,
         max_in_flight=config.max_in_flight,
         autoplay=config.autoplay,

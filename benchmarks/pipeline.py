@@ -26,7 +26,7 @@ from typing import Any, cast
 from PIL import Image, features
 
 import kaleidoscope.session as session_module
-from kaleidoscope.encoding import EncodedImage, encode_jpeg
+from kaleidoscope.encoding import EncodedImage, encode_jpeg, encode_webp
 from kaleidoscope.frame_adapter import RGB24Frame, interleave_rgb24
 from kaleidoscope.session import PreviewSession
 from kaleidoscope.sources import (
@@ -187,15 +187,22 @@ def _codec_operations() -> dict[str, Callable[[bytes, int, int, int], EncodedIma
         ),
     }
     if features.check("webp"):
-        operations["webp_method_0"] = (
-            lambda pixels, width, height, quality: _encode_pillow(
+        operations["webp_lossy_method_0"] = (
+            lambda pixels, width, height, quality: encode_webp(
                 pixels,
                 width,
                 height,
                 quality,
-                image_format="WEBP",
-                mime="image/webp",
-                options={"method": 0, "lossless": False, "exact": False},
+                lossless=False,
+            )
+        )
+        operations["webp_lossless_method_0"] = (
+            lambda pixels, width, height, quality: encode_webp(
+                pixels,
+                width,
+                height,
+                quality,
+                lossless=True,
             )
         )
     return operations
@@ -554,8 +561,6 @@ def run_scenario(
         source_clips,
         mode="single" if scenario.clip_count == 1 else "side-by-side",
         visible=tuple(source_clips),
-        width=scenario.width,
-        height=scenario.height,
         quality=QUALITY,
         max_in_flight=4,
         runtime=load_vapoursynth_runtime(),
@@ -684,8 +689,6 @@ def run_cleanup_probe(*, iterations: int) -> JsonObject:
             source_clips,
             mode="single",
             visible=tuple(source_clips),
-            width=320,
-            height=240,
             quality=QUALITY,
             max_in_flight=1,
             runtime=load_vapoursynth_runtime(),
@@ -931,9 +934,16 @@ def _decision(results: JsonObject) -> JsonObject:
     )
     transport_viable = latency_viable and playback_viable
     return {
-        "encoder": "Pillow JPEG",
-        "chroma_policy": "4:2:0",
+        "default_encoder": "Pillow JPEG",
+        "default_codec": "jpeg",
+        "selectable_codecs": ["jpeg", "webp"],
+        "jpeg_chroma_policy": "4:2:0",
+        "jpeg_quality_range": [0, 95],
+        "webp_quality_range": [0, 100],
+        "webp_lossless_supported": bool(micro["webp_supported_by_pillow"]),
+        "webp_method": 0,
         "default_quality": QUALITY,
+        "resolution_policy": "preserve source resolution; resize upstream",
         "interleave": "NumPy" if keep_numpy else "buffer-only",
         "numpy_runtime_dependency": keep_numpy,
         "numpy_720p_speedup": numpy_speedup,
@@ -945,9 +955,11 @@ def _decision(results: JsonObject) -> JsonObject:
         "paced_playback_threshold_passed": playback_viable,
         "human_gate": "G1 approval required before T7",
         "rationale": (
-            "JPEG 4:2:0 is the fastest measured encoder and avoids the larger 4:4:4 "
-            "payload; WebP saves bytes but costs materially more CPU. NumPy remains "
-            "only because its measured 720p gain is at least 20% and at least 1 ms."
+            "JPEG 4:2:0 remains the default because it is the fastest measured "
+            "encoder and avoids the larger 4:4:4 payload. Lossy and lossless WebP "
+            "remain explicit user choices because they save bytes on the measured "
+            "fixtures but cost materially more CPU. NumPy remains only because its "
+            "measured 720p gain is at least 20% and at least 1 ms."
         ),
     }
 
@@ -1181,7 +1193,10 @@ def render_report(results: JsonObject) -> str:
             "",
             "## Codec",
             "",
-            "Quality 80; WebP uses Pillow's speed-focused `method=0`.",
+            (
+                "All rows use quality 80. WebP uses Pillow's speed-focused "
+                "`method=0`; the lossless row also sets `lossless=True`."
+            ),
             "",
             "| Resolution | Codec | Encode median ms | CPU median ms "
             "| Payload KiB | Browser decode p95 ms |",
@@ -1324,10 +1339,17 @@ def render_report(results: JsonObject) -> str:
             "## Architecture Decision",
             "",
             (
-                f"- Encoder: **{decision['encoder']}**, chroma "
-                f"**{decision['chroma_policy']}**, quality "
+                f"- Default encoder: **{decision['default_encoder']}**, codec "
+                f"**{decision['default_codec']}**, chroma "
+                f"**{decision['jpeg_chroma_policy']}**, quality "
                 f"**{decision['default_quality']}**."
             ),
+            (
+                "- User-selectable encoding: JPEG quality 0-95 (lossy only), or "
+                "WebP quality 0-100 with lossy/lossless selection and "
+                f"`method={decision['webp_method']}`."
+            ),
+            (f"- Resolution policy: **{decision['resolution_policy']}**."),
             (
                 f"- Interleave: **{decision['interleave']}**; NumPy runtime "
                 f"dependency: **{decision['numpy_runtime_dependency']}**."
@@ -1346,6 +1368,7 @@ def render_report(results: JsonObject) -> str:
                 "measurement; this gate uses an explicitly labeled local copy "
                 "simulation."
             ),
+            f"- Rationale: {decision['rationale']}",
             f"- **{decision['human_gate']}**.",
             "",
             (

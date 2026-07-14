@@ -23,6 +23,26 @@ function createStatus(text: string): HTMLElement {
 
 type KaleidoscopeRenderProps = Pick<RenderProps, "model" | "el" | "signal">;
 
+const WEBP_DECODE_PROBE = new Uint8Array([
+  82, 73, 70, 70, 28, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 15, 0, 0,
+  0, 47, 0, 0, 0, 0, 7, 16, 253, 143, 254, 7, 34, 162, 255, 1, 0,
+]);
+
+async function supportsWebp(): Promise<boolean> {
+  if (typeof globalThis.createImageBitmap !== "function") {
+    return false;
+  }
+  try {
+    const bitmap = await globalThis.createImageBitmap(
+      new Blob([WEBP_DECODE_PROBE], { type: "image/webp" }),
+    );
+    bitmap.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   const status = createStatus("Initializing Kaleidoscope...");
   el.classList.add("kaleidoscope-widget");
@@ -143,12 +163,26 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     once: true,
   });
 
-  model.send(
-    createReadyMessage(sessionId, {
-      image_bitmap: typeof globalThis.createImageBitmap === "function",
-      webp: false,
-    }),
-  );
+  const imageBitmap = typeof globalThis.createImageBitmap === "function";
+  if (!imageBitmap) {
+    model.send(
+      createReadyMessage(sessionId, {
+        image_bitmap: false,
+        webp: false,
+      }),
+    );
+    return;
+  }
+  void supportsWebp().then((webp) => {
+    if (!signal.aborted) {
+      model.send(
+        createReadyMessage(sessionId, {
+          image_bitmap: true,
+          webp,
+        }),
+      );
+    }
+  });
 }
 
 export default { render };

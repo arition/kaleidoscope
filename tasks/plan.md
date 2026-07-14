@@ -1,8 +1,8 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T6 complete; stopped for G1 approval
-Source: `tasks/spec.md`, revision 0.3  
-Planning scope: Tasks T1-T6 may proceed; stop for human approval at G1
+Status: T1-T6 complete; G1 approved; Task 7 next
+Source: `tasks/spec.md`, revision 0.5 approved
+Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
 ## 1. Preconditions and Assumptions
 
@@ -13,7 +13,8 @@ Implementation must not begin until the approval gate in `tasks/spec.md` is reso
 - Direct clips, ordered collections, labeled mappings, and snapshots of registered outputs.
 - Caller-prepared `RGB24` as the authoritative path, with warned automatic conversion as a fallback.
 - Atomic synchronized frame sets for all multi-clip views.
-- JPEG-first image transport, subject to an early benchmark decision gate.
+- JPEG-default image transport with caller-selectable JPEG/WebP compression, as approved at G1.
+- Original clip resolution is preserved; preview resizing is performed upstream by the caller.
 - Linux-first local notebooks, without audio, VFR, variable resolution, or `.vpy` execution.
 
 Repository observations:
@@ -85,8 +86,8 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 **Acceptance criteria:**
 
 - [ ] `kaleidoscope` imports from the source tree and exposes `PreviewWidget` plus a placeholder `preview()` entry point.
-- [ ] The frontend registers custom-message listeners before sending `ready`.
-- [ ] Python sends initial metadata only after `ready` and rejects an incompatible protocol version.
+- [ ] The frontend registers custom-message listeners, probes WebP through `createImageBitmap(Blob)`, and then sends `ready`.
+- [ ] Python sends initial metadata only after an accepted `ready`; pre-ready requests, unsupported decoders/codecs, duplicate handshakes, and incompatible protocol versions close the session with a terminal error.
 - [ ] Protocol-v1 discriminated message types exist in Python and TypeScript with matching required fields.
 - [ ] The frontend renders an initialized placeholder without a CDN or runtime network request.
 - [ ] ESM and CSS assets are generated into `src/kaleidoscope/static/` and included in wheel/sdist builds.
@@ -133,11 +134,11 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] An `RGB24` node at target dimensions is not reconverted or resized.
+- [ ] An `RGB24` node is reused directly at its original dimensions.
 - [ ] `get_frame_async(0)` drives rendering without an unbounded executor.
 - [ ] Padded plane strides are copied correctly into interleaved RGB bytes.
-- [ ] Baseline JPEG encoding produces a MIME-typed binary payload with bounded declared length.
-- [ ] The frontend validates metadata and payload length, decodes the image, and paints frame 0.
+- [ ] Configured JPEG or WebP encoding produces a MIME-typed binary payload with bounded declared length.
+- [ ] The frontend validates metadata and payload length, decodes JPEG and WebP through `createImageBitmap(Blob)`, and paints frame 0.
 - [ ] `VideoFrame`, `Blob`, object URL, and `ImageBitmap` resources are released in success, error, and stale paths.
 - [ ] A generated known-color clip produces the expected canvas pixels in a real browser.
 
@@ -151,15 +152,15 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Dependencies:** T3.
 
-**Description:** Complete the compatibility path for users who pass a constant non-`RGB24` clip. The backend builds one fallback conversion/resize node, carries structured warnings through metadata, and the player visibly associates those warnings with the active clip while still painting the preview.
+**Description:** Complete the compatibility path for users who pass a constant non-`RGB24` clip. The backend builds one format-only fallback conversion node at the source dimensions, carries structured warnings through metadata, and the player visibly associates those warnings with the active clip while still painting the preview.
 
 **Primary surfaces:** source preparation in `sources.py` or a focused preparation module, warning protocol, player warning UI, Python/frontend/E2E tests.
 
 **Acceptance criteria:**
 
 - [ ] Caller-prepared `RGB24` remains the warning-free direct path.
-- [ ] Resizing an `RGB24` clip retains `RGB24` and does not emit an automatic-conversion warning.
-- [ ] A constant non-`RGB24` clip gets exactly one fallback graph node targeting `RGB24`, combining resize when practical.
+- [ ] Caller-prepared `RGB24` remains unchanged in format and dimensions and emits no automatic-conversion warning.
+- [ ] A constant non-`RGB24` clip gets exactly one format-conversion graph node targeting `RGB24` at the source dimensions.
 - [ ] `automatic_rgb24_conversion` identifies the source format and recommends explicit upstream conversion.
 - [ ] `assumed_color_metadata` lists matrix, transfer, and range defaults when source metadata is incomplete.
 - [ ] Warnings are visible text, clip-specific, accessible, and non-fatal.
@@ -199,7 +200,7 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Dependencies:** T5.
 
-**Description:** Measure the complete one-, two-, and four-clip path before building the full player. Record render, conversion, interleave, encode, payload, frame-set wait, comm, decode, and paint costs; compare JPEG/WebP and NumPy/buffer-only implementations; then either lock the MVP choices or stop and revise the transport architecture.
+**Description:** Measure the complete one-, two-, and four-clip path before building the full player. Record render, conversion, interleave, encode, payload, frame-set wait, comm, decode, and paint costs; compare JPEG 4:2:0/4:4:4, lossy/lossless WebP, and NumPy/buffer-only implementations; then either lock the MVP choices or stop and revise the transport architecture.
 
 **Primary surfaces:** `benchmarks/{clips,pipeline,memory}.py`, browser benchmark harness, benchmark report under `docs/` or `tasks/`, dependency decisions in the spec/build files.
 
@@ -207,19 +208,19 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 - [x] Benchmark inputs, machine details, resolutions, quality settings, warm-up, sample counts, and percentile calculations are reproducible.
 - [x] Caller-prepared RGB24 and fallback conversion costs are measured separately.
-- [x] JPEG 4:2:0/4:4:4 and WebP are compared where Pillow/browser support is reliable.
+- [x] JPEG 4:2:0/4:4:4 and lossy/lossless WebP are compared where Pillow/browser support is reliable.
 - [x] NumPy and a viable buffer-only plane interleave are compared before NumPy becomes permanent.
 - [x] One 1280x720 paused preview targets median under 150 ms and p95 under 250 ms.
 - [x] Two 960x540 paused previews target median under 225 ms and p95 under 350 ms.
 - [x] Playback feasibility is measured for one/two/four active clips, including bytes, CPU, lag, and drops.
-- [x] A written decision records encoder, chroma policy, interleave dependency, defaults, and whether the image protocol remains viable.
+- [x] A written decision records the default and selectable codec modes, quality/lossless semantics, source-resolution policy, interleave dependency, and whether the image protocol remains viable.
 - [x] Targets pass, so no transport revision is required before G1.
 
 **Verification:**
 
 - [x] Benchmark command completes and writes raw plus summarized results.
 - [x] Results can be reproduced from a clean environment using documented commands.
-- [ ] Human approves the gate decision before Task 7 begins.
+- [x] Human approves the gate decision before Task 7 begins.
 
 ## T7: Exact Paused Navigation
 

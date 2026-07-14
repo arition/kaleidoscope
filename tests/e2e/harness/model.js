@@ -9,6 +9,7 @@ const showConversionWarning = new URLSearchParams(window.location.search).has(
 const showSideBySide = new URLSearchParams(window.location.search).has(
   "side-by-side",
 );
+const showWebp = new URLSearchParams(window.location.search).get("codec") === "webp";
 const clipId = showConversionWarning ? "Filtered" : "Source";
 const activeClipIds = showSideBySide ? ["Source", "Filtered"] : [clipId];
 
@@ -85,7 +86,7 @@ const model = {
     if (message.type === "request_frame_set") {
       const fixtureNames = showSideBySide
         ? ["frame.jpg", "filtered.jpg"]
-        : ["frame.jpg"];
+        : [showWebp ? "frame.webp" : "frame.jpg"];
       void Promise.all(
         fixtureNames.map((name) =>
           fetch(`./${name}`).then((response) => response.arrayBuffer()),
@@ -102,7 +103,7 @@ const model = {
               frames: activeClipIds.map((activeClipId, bufferIndex) => ({
                   clip_id: activeClipId,
                   buffer_index: bufferIndex,
-                  mime: "image/jpeg",
+                  mime: showWebp ? "image/webp" : "image/jpeg",
                   byte_length: buffers[bufferIndex].byteLength,
                   render_ms: 0,
                   encode_ms: 0,

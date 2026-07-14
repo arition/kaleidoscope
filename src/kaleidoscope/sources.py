@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Literal
 
+from .encoding import Codec, supports_codec
+
 type ClipId = int | str
 type ComparisonMode = Literal[
     "auto",
@@ -94,7 +96,9 @@ class PreviewConfig:
     active_clip_ids: tuple[ClipId, ...]
     overlay_opacity: float
     max_visible_clips: int
+    codec: Codec
     quality: int
+    lossless: bool
     cache_size: int
     max_in_flight: int
     autoplay: bool
@@ -126,9 +130,8 @@ def load_vapoursynth_runtime() -> VapourSynthRuntime:
         transfer: int | None,
         color_range: int | None,
     ) -> object:
+        del width, height
         arguments: dict[str, object] = {
-            "width": width,
-            "height": height,
             "format": vapoursynth.RGB24,
         }
         if matrix is not None:
@@ -249,21 +252,6 @@ def _clip_fps(node: object) -> Fraction:
     return Fraction(numerator, denominator)
 
 
-def _output_dimensions(
-    source_width: int,
-    source_height: int,
-    width: int | None,
-    height: int | None,
-) -> tuple[int, int]:
-    scales = [Fraction(1, 1)]
-    if width is not None:
-        scales.append(Fraction(width, source_width))
-    if height is not None:
-        scales.append(Fraction(height, source_height))
-    scale = min(scales)
-    return max(1, int(source_width * scale)), max(1, int(source_height * scale))
-
-
 def _join_assumptions(assumptions: list[str]) -> str:
     if len(assumptions) == 1:
         return assumptions[0]
@@ -287,15 +275,9 @@ def _prepare_preview_node(
     source_format: str,
     source_width: int,
     source_height: int,
-    output_width: int,
-    output_height: int,
     runtime: VapourSynthRuntime,
 ) -> tuple[object, tuple[ClipWarning, ...]]:
-    if (
-        source_format == "RGB24"
-        and source_width == output_width
-        and source_height == output_height
-    ):
+    if source_format == "RGB24":
         return node, ()
 
     matrix: int | None = None
@@ -356,8 +338,8 @@ def _prepare_preview_node(
     try:
         prepared = runtime.prepare_rgb24(
             node,
-            output_width,
-            output_height,
+            source_width,
+            source_height,
             matrix,
             transfer,
             color_range,
@@ -371,8 +353,8 @@ def _prepare_preview_node(
     preview_format = getattr(getattr(prepared, "format", None), "name", None)
     if (
         preview_format != "RGB24"
-        or getattr(prepared, "width", None) != output_width
-        or getattr(prepared, "height", None) != output_height
+        or getattr(prepared, "width", None) != source_width
+        or getattr(prepared, "height", None) != source_height
     ):
         raise KaleidoscopeError(
             "conversion_failed",
@@ -386,8 +368,6 @@ def _validate_clip(
     label: str,
     node: object,
     runtime: VapourSynthRuntime,
-    width: int | None,
-    height: int | None,
 ) -> tuple[NormalizedClip, int, Fraction]:
     if not isinstance(node, runtime.video_node_type):
         raise KaleidoscopeError(
@@ -418,20 +398,12 @@ def _validate_clip(
             "invalid_clip",
             f"Clip {label!r} must have a known constant format.",
         )
-    output_width, output_height = _output_dimensions(
-        source_width,
-        source_height,
-        width,
-        height,
-    )
     preview_node, warnings = _prepare_preview_node(
         node,
         label=label,
         source_format=format_name,
         source_width=source_width,
         source_height=source_height,
-        output_width=output_width,
-        output_height=output_height,
         runtime=runtime,
     )
     return (
@@ -443,8 +415,8 @@ def _validate_clip(
             preview_format="RGB24",
             source_width=source_width,
             source_height=source_height,
-            output_width=output_width,
-            output_height=output_height,
+            output_width=source_width,
+            output_height=source_height,
             warnings=warnings,
         ),
         num_frames,
@@ -550,9 +522,9 @@ def build_preview_config(
     visible: Sequence[ClipId] | None = None,
     overlay_opacity: float = 0.5,
     max_visible_clips: int = 4,
-    width: int | None = None,
-    height: int | None = 720,
+    codec: Codec = "jpeg",
     quality: int = 80,
+    lossless: bool = False,
     cache_size: int = 32,
     max_in_flight: int = 4,
     autoplay: bool = False,
@@ -560,41 +532,58 @@ def build_preview_config(
 ) -> PreviewConfig:
     if mode not in _COMPARISON_MODES:
         raise KaleidoscopeError("comparison_unsupported", f"Unknown mode {mode!r}.")
-    if not isinstance(max_visible_clips, int) or not 1 <= max_visible_clips <= 4:
+    if (
+        not isinstance(max_visible_clips, int)
+        or isinstance(max_visible_clips, bool)
+        or not 1 <= max_visible_clips <= 4
+    ):
         raise KaleidoscopeError(
             "too_many_visible_clips",
             "max_visible_clips must be between 1 and 4.",
-        )
-    if width is not None:
-        _positive_int(
-            width,
-            code="unsupported_dimensions",
-            message="Preview width must be a positive integer.",
-        )
-    if height is not None:
-        _positive_int(
-            height,
-            code="unsupported_dimensions",
-            message="Preview height must be a positive integer.",
         )
     if not isinstance(overlay_opacity, int | float) or not 0 <= overlay_opacity <= 1:
         raise KaleidoscopeError(
             "comparison_unsupported",
             "overlay_opacity must be between 0 and 1.",
         )
+    if codec not in {"jpeg", "webp"}:
+        raise KaleidoscopeError(
+            "invalid_encoding",
+            "codec must be either 'jpeg' or 'webp'.",
+        )
+    if not supports_codec(codec):
+        raise KaleidoscopeError(
+            "unsupported_codec",
+            "Pillow WebP support is unavailable.",
+        )
+    if not isinstance(lossless, bool):
+        raise KaleidoscopeError("invalid_encoding", "lossless must be a boolean.")
+    maximum_quality = 95 if codec == "jpeg" else 100
     if (
         not isinstance(quality, int)
         or isinstance(quality, bool)
-        or not 1 <= quality <= 100
+        or not 0 <= quality <= maximum_quality
     ):
-        raise KaleidoscopeError("invalid_clip", "quality must be between 1 and 100.")
+        raise KaleidoscopeError(
+            "invalid_encoding",
+            f"{codec.upper()} quality must be between 0 and {maximum_quality}.",
+        )
+    if lossless and codec != "webp":
+        raise KaleidoscopeError(
+            "invalid_encoding",
+            "lossless=True is only available with codec='webp'.",
+        )
     if (
         not isinstance(cache_size, int)
         or isinstance(cache_size, bool)
         or cache_size < 0
     ):
         raise KaleidoscopeError("invalid_clip", "cache_size must be non-negative.")
-    if not isinstance(max_in_flight, int) or not 1 <= max_in_flight <= 16:
+    if (
+        not isinstance(max_in_flight, int)
+        or isinstance(max_in_flight, bool)
+        or not 1 <= max_in_flight <= 16
+    ):
         raise KaleidoscopeError(
             "invalid_clip",
             "max_in_flight must be between 1 and 16.",
@@ -610,8 +599,6 @@ def build_preview_config(
             label,
             node,
             runtime,
-            width,
-            height,
         )
         if timeline_frames is None:
             timeline_frames = num_frames
@@ -662,7 +649,9 @@ def build_preview_config(
         active_clip_ids=active_clip_ids,
         overlay_opacity=float(overlay_opacity),
         max_visible_clips=max_visible_clips,
+        codec=codec,
         quality=quality,
+        lossless=lossless,
         cache_size=cache_size,
         max_in_flight=max_in_flight,
         autoplay=autoplay,

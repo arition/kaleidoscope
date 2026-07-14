@@ -1,16 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { render } from "../../frontend/index.js";
 import { FakeModel } from "./support/fake-model.js";
 
 describe("widget render", () => {
-  it("registers the custom message listener before sending ready", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("registers the custom message listener before sending ready", async () => {
     const model = new FakeModel();
     const element = document.createElement("div");
     const controller = new AbortController();
 
     render({ model, el: element, signal: controller.signal });
 
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
     expect(model.order.slice(0, 2)).toEqual(["on:msg:custom", "send:ready"]);
     expect(model.sent).toEqual([
       {
@@ -19,6 +24,57 @@ describe("widget render", () => {
         session_id: "session-1",
         capabilities: {
           image_bitmap: false,
+          webp: false,
+        },
+      },
+    ]);
+  });
+
+  it("reports WebP support after decoding through createImageBitmap", async () => {
+    const close = vi.fn();
+    const createImageBitmap = vi.fn().mockResolvedValue({ close });
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    expect(model.sent).toEqual([
+      {
+        protocol: 1,
+        type: "ready",
+        session_id: "session-1",
+        capabilities: {
+          image_bitmap: true,
+          webp: true,
+        },
+      },
+    ]);
+    expect(createImageBitmap).toHaveBeenCalledWith(
+      expect.objectContaining({ size: 36, type: "image/webp" }),
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("does not report WebP when the production decode path rejects it", async () => {
+    const createImageBitmap = vi.fn().mockRejectedValue(new Error("unsupported"));
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    expect(model.sent).toEqual([
+      {
+        protocol: 1,
+        type: "ready",
+        session_id: "session-1",
+        capabilities: {
+          image_bitmap: true,
           webp: false,
         },
       },

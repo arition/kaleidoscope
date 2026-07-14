@@ -33,8 +33,8 @@ describe("metadata presentation", () => {
           source_format: "RGB24",
           source_width: 1920,
           source_height: 1080,
-          output_width: 960,
-          output_height: 540,
+          output_width: 1920,
+          output_height: 1080,
           warnings: [],
         },
         {
@@ -43,8 +43,8 @@ describe("metadata presentation", () => {
           source_format: "YUV420P10",
           source_width: 1280,
           source_height: 720,
-          output_width: 960,
-          output_height: 540,
+          output_width: 1280,
+          output_height: 720,
           warnings: [],
         },
       ],
@@ -174,8 +174,12 @@ describe("metadata presentation", () => {
       clearRect: vi.fn(),
       drawImage,
     } as unknown as CanvasRenderingContext2D);
-    const close = vi.fn();
-    const createImageBitmap = vi.fn().mockResolvedValue({ close });
+    const probeClose = vi.fn();
+    const frameClose = vi.fn();
+    const createImageBitmap = vi
+      .fn()
+      .mockResolvedValueOnce({ close: probeClose })
+      .mockResolvedValueOnce({ close: frameClose });
     vi.stubGlobal("createImageBitmap", createImageBitmap);
 
     const model = new FakeModel();
@@ -183,6 +187,7 @@ describe("metadata presentation", () => {
     const controller = new AbortController();
 
     render({ model, el: element, signal: controller.signal });
+  await vi.waitFor(() => expect(model.sent).toHaveLength(1));
     model.emit({
       protocol: 1,
       type: "metadata",
@@ -252,13 +257,15 @@ describe("metadata presentation", () => {
     expect(createImageBitmap).toHaveBeenCalledWith(
       expect.objectContaining({ size: payload.byteLength, type: "image/jpeg" }),
     );
-    expect(close).toHaveBeenCalledOnce();
+    expect(probeClose).toHaveBeenCalledOnce();
+    expect(frameClose).toHaveBeenCalledOnce();
   });
 
   it("atomically paints a complete two-clip frame set", async () => {
     const drawOrder: string[] = [];
     const firstClose = vi.fn();
     const secondClose = vi.fn();
+    const probeClose = vi.fn();
     const firstBitmap = { close: firstClose } as unknown as ImageBitmap;
     const secondBitmap = { close: secondClose } as unknown as ImageBitmap;
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
@@ -281,6 +288,7 @@ describe("metadata presentation", () => {
     });
     const createImageBitmap = vi
       .fn()
+      .mockResolvedValueOnce({ close: probeClose } as unknown as ImageBitmap)
       .mockReturnValueOnce(firstDecode)
       .mockReturnValueOnce(secondDecode);
     vi.stubGlobal("createImageBitmap", createImageBitmap);
@@ -290,6 +298,7 @@ describe("metadata presentation", () => {
     const controller = new AbortController();
 
     render({ model, el: element, signal: controller.signal });
+  await vi.waitFor(() => expect(model.sent).toHaveLength(1));
     model.emit({
       protocol: 1,
       type: "metadata",
@@ -368,6 +377,7 @@ describe("metadata presentation", () => {
     await vi.waitFor(() =>
       expect(drawOrder).toEqual(["Source", "Filtered"]),
     );
+    expect(probeClose).toHaveBeenCalledOnce();
     expect(firstClose).toHaveBeenCalledOnce();
     expect(secondClose).toHaveBeenCalledOnce();
   });

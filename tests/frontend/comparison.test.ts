@@ -198,9 +198,11 @@ describe("atomic comparison painting", () => {
       clearRect: vi.fn(),
       drawImage,
     } as unknown as CanvasRenderingContext2D);
+    const probeClose = vi.fn();
     const close = vi.fn();
     const createImageBitmap = vi
       .fn()
+      .mockResolvedValueOnce({ close: probeClose } as unknown as ImageBitmap)
       .mockResolvedValue({ close } as unknown as ImageBitmap);
     vi.stubGlobal("createImageBitmap", createImageBitmap);
 
@@ -208,6 +210,9 @@ describe("atomic comparison painting", () => {
     const element = document.createElement("div");
     const controller = new AbortController();
     render({ model, el: element, signal: controller.signal });
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    expect(probeClose).toHaveBeenCalledOnce();
+    createImageBitmap.mockClear();
     model.emit(metadata);
     model.emit(frameSet(0), payloads());
 

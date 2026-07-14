@@ -114,7 +114,6 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
     widget = preview(
         {"Source": FakeVideoNode(), "Filtered": FakeVideoNode()},
         mode="side-by-side",
-        height=540,
     )
     widget._handle_custom_message(
         widget,
@@ -148,8 +147,8 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
                     "source_format": "RGB24",
                     "source_width": 1920,
                     "source_height": 1080,
-                    "output_width": 960,
-                    "output_height": 540,
+                    "output_width": 1920,
+                    "output_height": 1080,
                     "warnings": [],
                 },
                 {
@@ -158,8 +157,8 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
                     "source_format": "RGB24",
                     "source_width": 1920,
                     "source_height": 1080,
-                    "output_width": 960,
-                    "output_height": 540,
+                    "output_width": 1920,
+                    "output_height": 1080,
                     "warnings": [],
                 },
             ],
@@ -181,7 +180,6 @@ def test_preview_serializes_clip_specific_conversion_warnings(
 
     widget = preview(
         FakeVideoNode(width=640, height=360, format_name="YUV420P8"),
-        height=None,
     )
     widget._handle_custom_message(
         widget,
@@ -235,7 +233,18 @@ def test_preview_routes_frame_request_to_binary_widget_message(
         "send",
         lambda self, content, buffers=None: sent.append((content, buffers)),
     )
-    widget = preview(node, height=None)
+    widget = preview(node, codec="webp", quality=100, lossless=True)
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "ready",
+            "session_id": widget.session_id,
+            "capabilities": {"image_bitmap": True, "webp": True},
+        },
+        [],
+    )
+    sent.clear()
     widget._handle_custom_message(
         widget,
         {
@@ -261,4 +270,5 @@ def test_preview_routes_frame_request_to_binary_widget_message(
     assert message["frame"] == 0
     assert isinstance(buffers, list)
     assert len(buffers) == 1
-    assert buffers[0].startswith(b"\xff\xd8")
+    assert buffers[0].startswith(b"RIFF")
+    assert buffers[0][8:12] == b"WEBP"

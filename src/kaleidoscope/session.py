@@ -7,7 +7,7 @@ from threading import Lock, RLock
 from time import perf_counter
 from typing import Any, cast
 
-from .encoding import MAX_ENCODED_FRAME_BYTES, EncodedImage, encode_jpeg
+from .encoding import MAX_ENCODED_FRAME_BYTES, EncodedImage, Encoder, create_encoder
 from .frame_adapter import RGB24Frame, interleave_rgb24
 from .protocol import FrameManifest, frame_set_message, runtime_error_message
 from .scheduler import FrameSetScheduler, ScheduledFrame
@@ -16,7 +16,6 @@ from .sources import ClipId, NormalizedClip, PreviewConfig
 _LOGGER = logging.getLogger(__name__)
 
 type SendMessage = Callable[[dict[str, object], list[bytes]], None]
-type Encoder = Callable[[bytes, int, int, int], EncodedImage]
 type Clock = Callable[[], float]
 
 
@@ -52,13 +51,16 @@ class PreviewSession:
         session_id: str,
         config: PreviewConfig,
         send: SendMessage,
-        encoder: Encoder = encode_jpeg,
+        encoder: Encoder | None = None,
         clock: Clock = perf_counter,
     ) -> None:
         self._session_id = session_id
         self._config = config
         self._send = send
-        self._encoder = encoder
+        self._encoder = encoder or create_encoder(
+            config.codec,
+            lossless=config.lossless,
+        )
         self._clock = clock
         self._clips = {clip.id: clip for clip in config.clips}
         self._lock = Lock()

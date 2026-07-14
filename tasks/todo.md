@@ -1,8 +1,8 @@
 # Kaleidoscope Task List
 
-Status: T6 complete; stopped at G1 for human approval
+Status: G1 approved; T7 is the next implementation task
 Source plan: `tasks/plan.md`  
-Source spec: `tasks/spec.md`, revision 0.4 draft
+Source spec: `tasks/spec.md`, revision 0.5 approved
 
 Do not start product implementation until Gate 0 is complete. Check a task only after its acceptance criteria and listed verification pass.
 
@@ -14,10 +14,12 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Confirm caller-owned `RGB24` plus warned fallback conversion.
   - [x] Confirm atomic multi-clip comparison modes and four-visible-clip cap.
   - [x] Confirm Linux-first host matrix and performance targets.
-- [ ] **G1 - Approve pipeline benchmark outcome after T6**
-  - [ ] Lock encoder/chroma policy.
-  - [ ] Decide whether NumPy remains a runtime dependency.
-  - [ ] Confirm image-per-frame transport remains viable or revise the spec.
+- [x] **G1 - Approve pipeline benchmark outcome after T6**
+  - [x] Approve JPEG 4:2:0 quality 80 as the default encoder.
+  - [x] Approve selectable JPEG/WebP quality and WebP-only lossless mode.
+  - [x] Approve original-resolution transport with upstream-only resizing.
+  - [x] Decide whether NumPy remains a runtime dependency.
+  - [x] Confirm image-per-frame transport remains viable or revise the spec.
 - [ ] **G2 - Approve release readiness after T13**
   - [ ] Review compatibility, benchmark, memory, accessibility, and quality reports.
 
@@ -25,7 +27,7 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
 
 - [x] **T1 - Bootable packaged widget shell** (depends on G0)
   - [x] Add Python, TypeScript, Hatch, npm, esbuild, test, lint, and type-check scaffolding.
-  - [x] Implement protocol-v1 `ready`/metadata handshake with a visible placeholder.
+  - [x] Implement strict protocol-v1 decoder negotiation and `ready`/metadata handshake with terminal pre-ready/error suppression.
   - [x] Bundle ESM/CSS into wheel and sdist without runtime network requests.
   - [x] Establish and run every command in the verification command contract.
 
@@ -36,14 +38,14 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Render clip/timeline metadata and test stable error codes.
 
 - [x] **T3 - Single RGB24 frame end to end** (depends on T2)
-  - [x] Use caller-prepared target-size `RGB24` without conversion.
+  - [x] Use caller-prepared `RGB24` at its original dimensions without conversion.
   - [x] Retrieve frame 0 asynchronously and close every `VideoFrame` path.
   - [x] Adapt strided planar RGB and encode a bounded MIME-typed payload.
   - [x] Decode/paint in the browser and verify known canvas pixels.
 
 - [x] **T4 - Warned automatic RGB24 fallback** (depends on T3)
-  - [x] Keep direct and resize-only RGB24 paths warning-free.
-  - [x] Build one fallback conversion/resize node for non-RGB24 clips.
+  - [x] Keep direct RGB24 nodes unchanged and warning-free.
+  - [x] Build one format-only fallback conversion node at source dimensions for non-RGB24 clips.
   - [x] Emit automatic-conversion and assumed-color-metadata warnings.
   - [x] Render visible accessible clip-specific warnings and test YUV preview.
 
@@ -55,7 +57,7 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
 
 - [x] **T6 - Pipeline benchmark and architecture gate** (depends on T5)
   - [x] Benchmark one/two/four clips and RGB24/fallback paths.
-  - [x] Compare JPEG/WebP, chroma policies, and NumPy/buffer-only interleave.
+  - [x] Compare JPEG chroma policies, lossy/lossless WebP, and NumPy/buffer-only interleave.
   - [x] Record render-through-paint percentiles, bytes, CPU, lag, and drops.
   - [x] Publish the decision and stop at G1 before continuing.
 

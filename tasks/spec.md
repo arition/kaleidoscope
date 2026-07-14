@@ -1,7 +1,7 @@
 # Kaleidoscope: Real-Time VapourSynth Preview for Jupyter
 
-Status: T6 benchmark amendment awaiting G1 approval
-Spec revision: 0.4 draft
+Status: G1 approved; Task 7 authorized
+Spec revision: 0.5 approved
 Research baseline: July 2026
 
 ## 1. Approval Gate
@@ -10,7 +10,7 @@ This document is the implementation contract for the first release. No package s
 
 The user delegated unanswered product decisions to the implementer. Those decisions are marked **Proposed** and remain reviewable at approval time.
 
-Revision 0.4 records the Task 6 benchmark selections for encoding, interleave, and transport. They are implemented and measured, but Task 7 must not begin until the user approves them at G1.
+Revision 0.5 records the Task 6 benchmark selections plus the requested configurable JPEG/WebP policy and source-resolution-only rendering. They are implemented, measured, and approved at G1; Task 7 may proceed.
 
 Approval should confirm these consequential choices:
 
@@ -19,7 +19,7 @@ Approval should confirm these consequential choices:
 3. Target local, Linux-first, constant-frame-rate preview without audio for the MVP.
 4. Include synchronized single, side-by-side, wipe, opacity-overlay, and difference comparison modes in the MVP.
 5. Expect callers to supply `RGB24` clips; provide automatic RGB24 conversion only as a visible, warned fallback.
-6. Stream an atomic set of individually encoded preview frames, initially JPEG, rather than a continuous video stream.
+6. Stream an atomic set of individually encoded preview frames using caller-selected JPEG or WebP, with JPEG quality 80 as the measured default, rather than a continuous video stream.
 7. Treat "real time" as clock-correct playback with bounded latency and frame dropping, not guaranteed full-rate rendering for every VapourSynth graph.
 8. Use the proposed package name `kaleidoscope` and MIT license.
 
@@ -94,7 +94,8 @@ It does not mean that an arbitrarily expensive VapourSynth graph is guaranteed t
 - Show current frame, total frames, current time, duration, dimensions, and FPS.
 - Keyboard-accessible controls and shortcuts when the player has focus.
 - Fit the preview responsively while preserving source aspect ratio.
-- Offer preview resolution and quality controls through Python options.
+- Offer codec-specific compression controls through Python options.
+- Preserve each clip's original resolution; users resize explicitly in their VapourSynth graph when a smaller preview is desired.
 - Surface loading, buffering, end-of-clip, disconnected-kernel, and render-error states.
 - Dispose resources when the widget closes or its view is removed.
 - Support multiple independent players in one kernel, within configured resource limits.
@@ -107,6 +108,7 @@ It does not mean that an arbitrarily expensive VapourSynth graph is guaranteed t
 - Remote/cloud notebook optimization or WAN streaming guarantees.
 - Variable-frame-rate timing.
 - Variable-resolution clips.
+- Internal preview resizing or implicit downscaling.
 - HDR-accurate display or color-managed reference monitoring.
 - Scopes, frame properties, pixel inspection, or annotations.
 - Using `VideoOutputTuple.alpha` or `alt_output` packing semantics; comparison overlays blend the normalized RGB previews in the browser.
@@ -138,6 +140,7 @@ ComparisonMode: TypeAlias = Literal[
     "overlay",
     "difference",
 ]
+Codec: TypeAlias = Literal["jpeg", "webp"]
 
 def preview(
     clips: ClipInput | None = None,
@@ -148,9 +151,9 @@ def preview(
     visible: Sequence[ClipId] | None = None,
     overlay_opacity: float = 0.5,
     max_visible_clips: int = 4,
-    width: int | None = None,
-    height: int | None = 720,
+    codec: Codec = "jpeg",
     quality: int = 80,
+    lossless: bool = False,
     cache_size: int = 32,
     max_in_flight: int = 4,
     autoplay: bool = False,
@@ -175,8 +178,10 @@ Validation rules:
 - Supplied IDs must resolve to normalized clips. Pair-mode defaults use the first two clips in input order, and `secondary` must differ from `primary`.
 - All supplied clips remain selectable, but no more than `max_visible_clips` may be rendered simultaneously; the MVP permits values from 1 through 4.
 - `overlay_opacity` must be between 0 and 1 and controls the B layer in overlay mode.
-- Width/height options control preview-only resizing after RGB24 preparation and preserve each clip's aspect ratio; if both are supplied, each clip is contained within that box. Preview dimensions should not upscale a source by default.
-- `quality` is clamped or rejected outside a documented range.
+- The extension does not resize clips. Encoded dimensions always match the supplied node; users who want smaller previews must resize upstream in VapourSynth before calling `preview()`.
+- `codec="jpeg"` accepts `quality` from 0 through 95, always uses 4:2:0 chroma subsampling, and rejects `lossless=True`.
+- `codec="webp"` accepts `quality` from 0 through 100 and supports lossy or lossless encoding through `lossless`. Lossless quality follows Pillow's compression-effort semantics. WebP uses the speed-focused `method=0` setting.
+- Every session requires browser `createImageBitmap(Blob)` support because the MVP has no alternate image decoder. A WebP session additionally requires Pillow WebP support and a successful browser decode of an embedded WebP probe through that exact path. Unsupported capability produces a terminal `unsupported_codec` error before metadata or rendering begins.
 - `cache_size >= 0` and `max_in_flight` is restricted to a small safe range, initially 1-16. `max_in_flight` counts total submitted clip-frame renders, not logical frame sets.
 - `autoplay=True` begins only after the frontend sends `ready`; browser autoplay policy is not relevant because the MVP has no audio.
 
@@ -237,7 +242,8 @@ Shortcuts must not intercept notebook commands when the player is unfocused. Eve
 ### 4.6 Visibility and lifecycle
 
 - Playback pauses when the document becomes hidden; automatic resume occurs only if playback was active before hiding.
-- The frontend sends `ready` after all custom-message listeners are registered. Python must not send the initial frame before this handshake because early custom messages can be lost.
+- The frontend registers all custom-message listeners, probes WebP through `createImageBitmap()` when available, and then sends `ready` with the measured capabilities. Python must not send metadata or accept frame requests before this handshake because early custom messages can be lost and codec support has not been negotiated.
+- A malformed message, incompatible protocol, unsupported decoder/codec, duplicate `ready`, or frame request before `ready` moves the widget to a terminal error state, closes its preview session, and prevents later traffic from starting render work.
 - The frontend uses the lifecycle `AbortSignal` supplied by anywidget for DOM listeners and unregisters model listeners on abort.
 - Closing the widget marks the session closed, clears all per-clip encoded-frame caches, ignores late futures, and releases held `VideoFrame`, frame-set, and image resources.
 - Kernel disconnect places the player in a paused disconnected state while retaining the last complete painted frame set.
@@ -327,7 +333,7 @@ Browser owns:
 Python owns:
 
 - Input/output-registry normalization, cross-clip compatibility validation, and metadata.
-- Reuse of caller-prepared `RGB24` nodes or creation of a warned fallback RGB24 preview node per clip, plus preview-only resizing when requested.
+- Reuse of caller-prepared `RGB24` nodes or creation of one warned, format-only RGB24 fallback node per non-RGB24 clip.
 - Fair async frame submission across active clips, conversion, encoding, frame-set assembly, caching, and resource cleanup.
 - Request-generation tracking and stale-response suppression.
 - Enforcing concurrency and memory limits.
@@ -345,20 +351,18 @@ VapourSynth owns graph evaluation for every selected node and its internal frame
 
 ### 6.4 Preview node preparation
 
-Callers are expected to supply fixed-format `RGB24` nodes. Treat that conversion as authoritative: the extension must not reinterpret or reconvert an already-`RGB24` clip. At widget construction, select or prepare one preview node per clip with stable output characteristics:
+Callers are expected to supply fixed-format `RGB24` nodes at the resolution they want transported. Treat that conversion and geometry as authoritative: the extension must not reinterpret, reconvert, resize, or otherwise alter an already-`RGB24` clip. At widget construction, select or prepare one preview node per clip with stable output characteristics:
 
 1. Validate each clip's constant dimensions, frame count, and rational FPS, then validate the shared timeline.
 2. Require a known constant pixel format and inspect whether it is 8-bit planar RGB (`RGB24`).
-3. Resolve output dimensions while preserving each clip's aspect ratio and using even dimensions where required.
-4. For aligned pair modes, derive identical output canvas dimensions from the common source geometry.
-5. If an `RGB24` clip already has the resolved preview dimensions, use it directly without adding a conversion or resize node.
-6. If an `RGB24` clip only needs preview scaling, add one resize node that keeps the output format as `RGB24`.
-7. If a clip is not `RGB24`, create a fallback VapourSynth resize/conversion node targeting `RGB24`, combining preview scaling into the same graph operation when practical.
-8. For fallback conversion, apply explicit matrix/transfer/range choices when source properties provide them. Use a documented SDR assumption when metadata is absent.
+3. Use every `RGB24` clip directly at its source width and height.
+4. If a clip is not `RGB24`, create exactly one fallback VapourSynth format-conversion node targeting `RGB24` at the same width and height.
+5. For aligned pair modes, require identical source geometry; do not create an implicit alignment resize.
+6. For fallback conversion, apply explicit matrix/transfer/range choices when source properties provide them. Use a documented SDR assumption when metadata is absent.
 
 Automatic conversion is a compatibility convenience, not a reference color pipeline. Each affected clip must include an `automatic_rgb24_conversion` warning in metadata, and the frontend must display it whenever that clip is active. The warning should identify the source format and say that explicit conversion to `RGB24` in the user's VapourSynth graph is recommended. If color metadata was missing and defaults were assumed, add an `assumed_color_metadata` warning whose message lists the matrix, transfer, and range assumptions.
 
-The exact preview resize kernel should be a quality/performance setting. Default to a fast high-quality downscale appropriate for preview, proposed Lanczos with conservative taps. Resize alone does not trigger the conversion warning. Any fallback conversion and preview resize must be constructed once as part of the graph, not rebuilt for every request.
+The fallback format-conversion node is constructed once as part of the graph, not rebuilt for every request. Any desired resize kernel, dimensions, chroma handling, or scaling policy belongs in the caller's VapourSynth graph.
 
 ### 6.5 Frame acquisition
 
@@ -374,17 +378,19 @@ The exact preview resize kernel should be a quality/performance setting. Default
 
 Initial transport is one encoded image per active clip in each requested frame set:
 
-- T6-selected baseline, pending G1: Pillow JPEG with 4:2:0 chroma subsampling and default quality 80.
-- Decode in the browser using `createImageBitmap(Blob)` when supported, then draw to a `<canvas>`.
+- T6-selected default, pending G1: Pillow JPEG with 4:2:0 chroma subsampling and quality 80.
+- Callers may select JPEG quality 0-95 or WebP quality 0-100. JPEG is always lossy; WebP supports lossy and lossless modes. WebP uses Pillow `method=0`.
+- The encoded image keeps the supplied clip's original pixel dimensions. Browser layout may fit that image responsively, but the backend never changes its resolution.
+- Decode in the browser using `createImageBitmap(Blob)`, then draw to a `<canvas>`; unsupported hosts fail during the `ready` handshake rather than on the first frame.
 - Revoke/release `Blob`, `ImageBitmap`, and prior paint resources promptly.
 - Include alpha only in a future codec/path; MVP preview is opaque RGB.
 - Keep each clip as a separate image so the browser can switch comparison modes and adjust wipe/opacity without a kernel round trip.
 
-The encoder adapter receives `RGB24` frames from either the caller-prepared fast path or the warned fallback node. VapourSynth `RGB24` frames are planar and may be strided. The adapter copies each visible row from R, G, and B planes into a contiguous interleaved byte buffer before Pillow encoding. T6 selects NumPy `>=2.4,<3` for this operation, pending G1: at 1280x720 its median was 0.96 ms versus 3.72 ms for the viable buffer-only implementation, a 3.88x speedup and 2.76 ms median saving. The buffer-only implementation remains in the benchmark as a comparator, not as a runtime fallback.
+The encoder adapter receives `RGB24` frames from either the caller-prepared fast path or the warned fallback node. VapourSynth `RGB24` frames are planar and may be strided. The adapter copies each visible row from R, G, and B planes into a contiguous interleaved byte buffer before Pillow encoding. T6 selects NumPy `>=2.4,<3` for this operation, pending G1: at 1280x720 its median was 0.97 ms versus 3.61 ms for the viable buffer-only implementation, a 3.71x speedup and 2.64 ms median saving. The buffer-only implementation remains in the benchmark as a comparator, not as a runtime fallback.
 
-T6 compared JPEG 4:2:0, JPEG 4:4:4, and speed-focused WebP at quality 80. At 1280x720, median encode time and payload were 2.17 ms/17.9 KiB, 3.44 ms/27.2 KiB, and 13.18 ms/4.8 KiB respectively, with similar browser decode p95. JPEG 4:2:0 is selected because it minimizes CPU while avoiding the larger 4:4:4 payload. The protocol remains MIME-typed so an encoder can change without redesigning transport.
+T6 compared JPEG 4:2:0, JPEG 4:4:4, lossy WebP, and lossless WebP at quality 80. In the revised run at 1280x720, median encode time and payload were 2.16 ms/17.9 KiB, 3.43 ms/27.2 KiB, 13.20 ms/4.8 KiB, and 12.76 ms/4.2 KiB respectively, with browser decode p95 between 7.66 ms and 8.30 ms. JPEG 4:2:0 remains the default because it minimizes CPU while avoiding the larger 4:4:4 payload. WebP remains an explicit user choice for lower measured payloads or lossless transport. The protocol remains MIME-typed, so codec selection does not require a transport redesign.
 
-The image-per-frame protocol remains selected pending G1. The simulated local request-to-paint path measured 15.55 ms median/20.59 ms p95 for one 1280x720 direct RGB24 clip and 16.28 ms median/19.53 ms p95 for two synchronized 960x540 clips. Backend-paced and browser-inclusive latest-wins modeling delivered the target rates without drops for the supplied lightweight graphs. The comm component is explicitly an in-process buffer-copy simulation; real Jupyter comm latency remains a host-integration measurement and does not disappear from the release checklist.
+The image-per-frame protocol remains selected pending G1. The revised simulated local request-to-paint path measured 15.25 ms median/19.70 ms p95 for one 1280x720 direct RGB24 clip and 15.09 ms median/21.71 ms p95 for two synchronized 960x540 clips. Backend-paced and browser-inclusive latest-wins modeling delivered the target rates without drops for the supplied lightweight graphs. The comm component is explicitly an in-process buffer-copy simulation; real Jupyter comm latency remains a host-integration measurement and does not disappear from the release checklist.
 
 ### 6.7 Scheduling and backpressure
 
@@ -407,7 +413,7 @@ This separates VapourSynth in-flight work from comm delivery backpressure: an as
 Use a per-session LRU keyed by all output-affecting values:
 
 ```text
-(clip_id, frame_number, output_width, output_height, encoder, quality, conversion_revision)
+(clip_id, frame_number, source_width, source_height, codec, quality, lossless, conversion_revision)
 ```
 
 - Default capacity: 32 encoded clip frames per session, also constrained by a byte budget proposed at 64 MiB.
@@ -434,13 +440,13 @@ Frontend to Python:
 Python to frontend:
 
 ```json
-{"protocol":1,"type":"metadata","session_id":"...","num_frames":2400,"fps_num":24000,"fps_den":1001,"clips":[{"id":"Source","label":"Source","source_format":"RGB24","source_width":1920,"source_height":1080,"output_width":960,"output_height":540,"warnings":[]},{"id":"Filtered","label":"Filtered","source_format":"YUV420P10","source_width":1920,"source_height":1080,"output_width":960,"output_height":540,"warnings":[{"code":"automatic_rgb24_conversion","message":"YUV420P10 is being converted automatically for preview; convert to RGB24 explicitly for controlled color handling."}]}],"max_visible_clips":4}
+{"protocol":1,"type":"metadata","session_id":"...","num_frames":2400,"fps_num":24000,"fps_den":1001,"clips":[{"id":"Source","label":"Source","source_format":"RGB24","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[]},{"id":"Filtered","label":"Filtered","source_format":"YUV420P10","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[{"code":"automatic_rgb24_conversion","message":"YUV420P10 is being converted automatically for preview; convert to RGB24 explicitly for controlled color handling."}]}],"max_visible_clips":4}
 {"protocol":1,"type":"frame_set","session_id":"...","request_id":42,"generation":3,"frame":120,"frames":[{"clip_id":"Source","buffer_index":0,"mime":"image/jpeg","byte_length":81234,"render_ms":18.2,"encode_ms":5.7},{"clip_id":"Filtered","buffer_index":1,"mime":"image/jpeg","byte_length":85678,"render_ms":24.1,"encode_ms":5.9}]}
 {"protocol":1,"type":"error","session_id":"...","request_id":42,"generation":3,"clip_id":"Filtered","code":"render_failed","message":"...","recoverable":true}
 {"protocol":1,"type":"closed","session_id":"..."}
 ```
 
-The `frame_set` message contains one binary buffer for each manifest entry, indexed by `buffer_index`. Receivers must validate protocol version, message shape, frame bounds, session, generation, requested clip IDs and order, unique buffer indices, declared byte lengths, total payload limit, and MIME types before decoding. Unknown message types are ignored and reported in debug logging; incompatible protocol versions produce a visible terminal error.
+The `frame_set` message contains one binary buffer for each manifest entry, indexed by `buffer_index`. Receivers must validate protocol version, message shape, frame bounds, session, generation, requested clip IDs and order, unique buffer indices, declared byte lengths, total payload limit, and MIME types before decoding. Unknown message types, incompatible protocol versions, and messages that violate the handshake state produce a visible terminal error and close the backend preview session.
 
 ### 6.10 State model
 
@@ -483,9 +489,9 @@ Avoid a general event bus, dependency-injection framework, or plugin system in t
 | VapourSynth | `>=77,<78` initially | Frame graph and async retrieval | User/environment dependency; do not bundle native plugins. Widen after compatibility testing. |
 | anywidget | `>=0.11,<0.12` | Portable Jupyter widget | Provides custom binary messages and lifecycle signal. |
 | traitlets | `>=5.15,<6` | Low-rate synchronized widget state | anywidget dependency, declared only if imported directly. |
-| Pillow | `>=12.1,<13` | JPEG/WebP encoding | T6 selects JPEG 4:2:0 at quality 80; verify codec features in CI. |
-| NumPy | `>=2.4,<3` | Plane interleave and stride-safe conversion | T6 selects it for a measured 3.88x 720p interleave speedup, pending G1. |
-| Browser APIs | Canvas, Blob, `createImageBitmap`, Fullscreen, Page Visibility | Decode, paint, lifecycle | Provide image-element fallback if `createImageBitmap` is absent. |
+| Pillow | `>=12.1,<13` | JPEG/WebP encoding | JPEG 4:2:0 quality 80 is the measured default; WebP lossy/lossless is selectable. Verify WebP support in CI. |
+| NumPy | `>=2.4,<3` | Plane interleave and stride-safe conversion | T6 selects it for a measured 3.71x 720p interleave speedup, pending G1. |
+| Browser APIs | Canvas, Blob, `createImageBitmap`, Fullscreen, Page Visibility | Decode, paint, lifecycle | `createImageBitmap` is mandatory in MVP and negotiated before metadata/rendering. |
 
 The package must not install VapourSynth system libraries or third-party source/resize plugins. Installation documentation should explain that a working VapourSynth environment is prerequisite.
 
@@ -602,9 +608,11 @@ Use stable machine-readable codes and concise user messages:
 - `frame_out_of_range`
 - `render_failed`
 - `conversion_failed`
+- `invalid_encoding`
 - `encode_failed`
 - `decode_failed`
 - `protocol_mismatch`
+- `unsupported_codec`
 - `kernel_disconnected`
 - `session_closed`
 
@@ -659,11 +667,11 @@ Use fake clip/frame/future protocols for fast deterministic tests wherever Vapou
 
 Test:
 
-- API validation, input normalization, registered-output snapshotting, audio-output filtering, stable IDs/labels, and dimension calculation.
+- API validation, input normalization, registered-output snapshotting, audio-output filtering, stable IDs/labels, and source-dimension preservation.
 - Matching timeline validation and aligned-mode dimension checks.
 - Caller-supplied `RGB24` bypasses format conversion and produces no automatic-conversion warning.
 - Non-`RGB24` input creates one fallback RGB24 node and emits clip-specific warning metadata, including assumed color metadata when applicable.
-- Resizing an `RGB24` clip retains `RGB24` and does not emit an automatic-conversion warning.
+- Caller-prepared `RGB24` is reused at its original dimensions with no resize node.
 - Rational FPS/time/frame conversion without float-boundary errors.
 - Protocol serialization and validation.
 - Atomic frame-set assembly, missing/duplicate clip rejection, and deterministic buffer mapping.
@@ -673,7 +681,7 @@ Test:
 - Per-clip LRU count/byte eviction and key invalidation.
 - Success, partial exception, stale, and closed-session cleanup across frame sets.
 - Strided planar RGB interleave using synthetic non-contiguous planes.
-- Encoder selection and errors.
+- JPEG/WebP encoder selection, codec-specific quality bounds, lossless WebP round-trip, unsupported-codec handling, and payload errors.
 - Idempotent close and late callback behavior.
 
 Use property-based tests only if they materially simplify frame/time boundary coverage; it is not a mandatory dependency initially.
@@ -683,7 +691,7 @@ Use property-based tests only if they materially simplify frame/time boundary co
 Run against real VapourSynth with generated clips that require no external media or plugins:
 
 - Constant-color and frame-number-identifiable clips.
-- Non-square dimensions and downscaling.
+- Non-square and explicitly caller-resized dimensions.
 - RGB and representative YUV formats/ranges.
 - Caller-prepared `RGB24` uses the direct path; representative YUV input uses the fallback path and reports the source format and conversion warning.
 - First/middle/last exact frame verification by known pixel values.
@@ -701,7 +709,7 @@ Tests requiring VapourSynth should carry a marker so pure unit tests remain runn
 
 With Vitest/jsdom and a fake anywidget model:
 
-- Ready handshake ordering.
+- Ready handshake ordering, exact WebP decoder probing, pre-ready request rejection, and suppression of messages after terminal negotiation errors.
 - Playback clock to desired-frame calculation.
 - Play/pause/end/restart state transitions.
 - Scrub coalescing and resume semantics.
@@ -723,7 +731,7 @@ Use Playwright against a test JupyterLab or a small widget harness backed by a r
 
 Verify:
 
-- Widget initializes only after `ready` and paints frame 0 for every initially active clip.
+- Widget initializes only after a successful `ready`, rejects unsupported decoders before rendering, and paints JPEG and WebP frame 0 fixtures through the negotiated decoder.
 - Play, pause, seek, step, first/last, numeric entry, and fullscreen controls.
 - No-argument preview discovers labeled registered video outputs.
 - Direct mapping input preserves labels and order.
@@ -748,7 +756,7 @@ Create a benchmark suite that records, but does not make noisy shared-runner tim
 - VapourSynth render time.
 - Planar-to-interleaved conversion time.
 - Encode time and payload bytes by resolution/quality/codec.
-- Caller-prepared RGB24 versus automatic conversion/resize overhead.
+- Caller-prepared RGB24 versus automatic format-conversion overhead.
 - Frame-set assembly wait, comm send-to-receive, multi-buffer decode, composition, and paint time.
 - Delivered FPS, dropped frames, and clock lag.
 - Single-, two-, and four-clip scaling for CPU, payload bytes, latency, and delivered FPS.
@@ -757,7 +765,7 @@ Create a benchmark suite that records, but does not make noisy shared-runner tim
 
 Publish the benchmark machine, clips, settings, and raw percentile summary. The first implementation milestone is a pipeline spike; do not invest in full UI polish until it demonstrates the performance targets or produces a documented transport pivot.
 
-T6 publishes the summarized result in `tasks/benchmark-report.md` and raw samples in `benchmarks/results/t6-pipeline.json`. The measured recommendation is JPEG 4:2:0 at quality 80, NumPy interleave, and retention of MIME-typed image-per-frame transport, all pending G1 approval.
+T6 publishes the summarized result in `tasks/benchmark-report.md` and raw samples in `benchmarks/results/t6-pipeline.json`. The measured recommendation is JPEG 4:2:0 at quality 80 as the default, caller-selectable lossy/lossless WebP, source-resolution preservation, NumPy interleave, and retention of MIME-typed image-per-frame transport, all pending G1 approval.
 
 ### 12.6 Packaging tests
 
@@ -787,7 +795,7 @@ Exit: unit tests pass and a minimal widget can complete `ready`/multi-clip metad
 
 - Normalize direct and registered outputs, reuse caller-prepared RGB24 nodes, and prepare warned fallback RGB24 nodes only for unconverted clips.
 - Retrieve async frames, interleave planes, encode, assemble a two-clip frame set, send multiple binary buffers, decode, and paint atomically.
-- Benchmark JPEG and WebP, NumPy and viable alternatives, 480p/720p/1080p preview sizes, and one/two/four active clips.
+- Benchmark JPEG and WebP lossy/lossless, NumPy and viable alternatives, 480p/720p/1080p source resolutions, and one/two/four active clips.
 
 Exit: exact synchronized seek works, resources close correctly, and single/two-clip latency is near the target. If p95 local latency remains above 250 ms for one lightweight 720p clip or 350 ms for two lightweight 540p clips, or payload/CPU costs prevent target playback, stop and evaluate a streaming/WebCodecs or shared-memory architecture before building the full player.
 
@@ -822,7 +830,7 @@ Exit: clean-environment smoke test from wheel and sdist passes with no runtime n
 | Kernel is busy with blocking notebook work. | Controls update but new frames cannot arrive. | Browser-owned UI state; document limitation; defer worker process architecture. |
 | Users pass non-RGB24 clips with incomplete or varied color metadata. | Automatic fallback conversion may produce an incorrect preview appearance. | Prefer caller-prepared RGB24, show a persistent clip-specific UI warning, state any fallback assumptions, test representative formats, and document the SDR/non-reference scope. |
 | Stride/planar assumptions corrupt frames. | Visual corruption or crashes. | Dedicated adapter, synthetic padded-stride tests, close frames in `finally`. |
-| Widget messages sent before view listeners exist. | Missing initial frame. | Mandatory frontend `ready` handshake. |
+| Widget messages sent before view listeners exist or before codec negotiation completes. | Missing initial frame or undecodable payload. | Register listeners first, probe the production decoder, require `ready`, and terminally reject pre-ready requests. |
 | Hidden/removed views continue rendering. | Resource leak and wasted CPU. | Visibility pause, AbortSignal cleanup, close protocol, late-result suppression. |
 | Multiple players or multi-clip sessions exhaust memory/threads. | Kernel instability. | Global per-session future bounds, active-clip cap, byte-limited cache, conservative defaults, and stress tests. |
 | VapourSynth install differs by OS. | Poor onboarding. | Linux-first support, prerequisite docs, CI only where installation is reliable. |
@@ -857,8 +865,8 @@ Before implementation, the reviewer should approve or amend:
 - [x] No `.vpy` runner in MVP.
 - [x] Caller-prepared `RGB24` as the preferred path, with warned automatic conversion fallback for other constant formats.
 - [x] Linux-first, local notebook support matrix.
-- [x] CFR, silent, fixed-resolution MVP scope.
-- [x] JPEG-first binary frame transport and benchmark pivot gate.
+- [x] CFR, silent, fixed-resolution clip scope with no internal resizing.
+- [x] JPEG-default, JPEG/WebP-selectable binary frame transport and benchmark pivot gate.
 - [x] Single-clip 720p and two-clip 540p playback/latency acceptance targets.
 - [x] NumPy as a provisional runtime dependency.
 - [x] Lucide as a provisional bundled icon dependency.
@@ -868,6 +876,8 @@ Before implementation, the reviewer should approve or amend:
 
 ### 16.1 G1 Benchmark Decision
 
-- [ ] Approve Pillow JPEG 4:2:0 at quality 80 as the MVP encoder policy.
-- [ ] Approve NumPy `>=2.4,<3` as a runtime dependency for RGB24 interleave.
-- [ ] Approve retaining MIME-typed image-per-frame transport with real Jupyter comm latency deferred to host integration testing.
+- [x] Approve Pillow JPEG 4:2:0 at quality 80 as the default encoder.
+- [x] Approve caller-selectable JPEG quality 0-95 and WebP quality 0-100 with WebP-only lossless mode and `method=0`.
+- [x] Approve preserving supplied source resolution and requiring users to resize upstream in VapourSynth.
+- [x] Approve NumPy `>=2.4,<3` as a runtime dependency for RGB24 interleave.
+- [x] Approve retaining MIME-typed image-per-frame transport with real Jupyter comm latency deferred to host integration testing.

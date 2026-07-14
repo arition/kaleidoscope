@@ -32,7 +32,7 @@ function isClipWarning(value) {
   return isRecord(value) && (value.code === "automatic_rgb24_conversion" || value.code === "assumed_color_metadata") && typeof value.message === "string" && value.message.length > 0;
 }
 function isClipMetadata(value) {
-  return isRecord(value) && isClipId(value.id) && typeof value.label === "string" && value.label.length > 0 && typeof value.source_format === "string" && value.source_format.length > 0 && isPositiveInteger(value.source_width) && isPositiveInteger(value.source_height) && isPositiveInteger(value.output_width) && isPositiveInteger(value.output_height) && Array.isArray(value.warnings) && value.warnings.every(isClipWarning);
+  return isRecord(value) && isClipId(value.id) && typeof value.label === "string" && value.label.length > 0 && typeof value.source_format === "string" && value.source_format.length > 0 && isPositiveInteger(value.source_width) && isPositiveInteger(value.source_height) && isPositiveInteger(value.output_width) && isPositiveInteger(value.output_height) && value.output_width === value.source_width && value.output_height === value.source_height && Array.isArray(value.warnings) && value.warnings.every(isClipWarning);
 }
 function isFrameManifest(value) {
   return isRecord(value) && isClipId(value.clip_id) && isNonnegativeInteger(value.buffer_index) && (value.mime === "image/jpeg" || value.mime === "image/webp") && isPositiveInteger(value.byte_length) && value.byte_length <= MAX_FRAME_BUFFER_BYTES && isNonnegativeFiniteNumber(value.render_ms) && isNonnegativeFiniteNumber(value.encode_ms);
@@ -343,6 +343,58 @@ function createStatus(text) {
   status.textContent = text;
   return status;
 }
+var WEBP_DECODE_PROBE = new Uint8Array([
+  82,
+  73,
+  70,
+  70,
+  28,
+  0,
+  0,
+  0,
+  87,
+  69,
+  66,
+  80,
+  86,
+  80,
+  56,
+  76,
+  15,
+  0,
+  0,
+  0,
+  47,
+  0,
+  0,
+  0,
+  0,
+  7,
+  16,
+  253,
+  143,
+  254,
+  7,
+  34,
+  162,
+  255,
+  1,
+  0
+]);
+async function supportsWebp() {
+  if (typeof globalThis.createImageBitmap !== "function") {
+    return false;
+  }
+  try {
+    const bitmap = await globalThis.createImageBitmap(
+      new Blob([WEBP_DECODE_PROBE], { type: "image/webp" })
+    );
+    bitmap.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
 function render({ model, el, signal }) {
   const status = createStatus("Initializing Kaleidoscope...");
   el.classList.add("kaleidoscope-widget");
@@ -436,12 +488,26 @@ function render({ model, el, signal }) {
   signal.addEventListener("abort", () => model.off("msg:custom", onMessage), {
     once: true
   });
-  model.send(
-    createReadyMessage(sessionId, {
-      image_bitmap: typeof globalThis.createImageBitmap === "function",
-      webp: false
-    })
-  );
+  const imageBitmap = typeof globalThis.createImageBitmap === "function";
+  if (!imageBitmap) {
+    model.send(
+      createReadyMessage(sessionId, {
+        image_bitmap: false,
+        webp: false
+      })
+    );
+    return;
+  }
+  void supportsWebp().then((webp) => {
+    if (!signal.aborted) {
+      model.send(
+        createReadyMessage(sessionId, {
+          image_bitmap: true,
+          webp
+        })
+      );
+    }
+  });
 }
 var index_default = { render };
 export {

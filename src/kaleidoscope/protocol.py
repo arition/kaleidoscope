@@ -85,7 +85,7 @@ class FrameSetMessage(TypedDict):
 class ProtocolError(ValueError):
     def __init__(
         self,
-        code: Literal["invalid_message", "protocol_mismatch"],
+        code: Literal["invalid_message", "protocol_mismatch", "unsupported_codec"],
         message: str,
     ) -> None:
         super().__init__(message)
@@ -125,16 +125,15 @@ def parse_frontend_message(value: object) -> FrontendMessage:
         raise ProtocolError("invalid_message", "Frontend message must be an object.")
 
     protocol = value.get("protocol")
-    if protocol != PROTOCOL_VERSION:
-        if isinstance(protocol, int):
-            raise ProtocolError(
-                "protocol_mismatch",
-                "Unsupported protocol version "
-                f"{protocol}; expected {PROTOCOL_VERSION}.",
-            )
+    if not isinstance(protocol, int) or isinstance(protocol, bool):
         raise ProtocolError(
             "invalid_message",
             "Frontend message is missing protocol version 1.",
+        )
+    if protocol != PROTOCOL_VERSION:
+        raise ProtocolError(
+            "protocol_mismatch",
+            f"Unsupported protocol version {protocol}; expected {PROTOCOL_VERSION}.",
         )
 
     session_id = value.get("session_id")

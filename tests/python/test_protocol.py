@@ -129,6 +129,18 @@ def test_frame_set_message_rejects_non_deterministic_indices() -> None:
     "message",
     [
         {},
+        {
+            "protocol": True,
+            "type": "ready",
+            "session_id": "session-1",
+            "capabilities": {"image_bitmap": True, "webp": False},
+        },
+        {
+            "protocol": 1.0,
+            "type": "ready",
+            "session_id": "session-1",
+            "capabilities": {"image_bitmap": True, "webp": False},
+        },
         {"protocol": 1, "type": "unknown", "session_id": "session-1"},
         {
             "protocol": 1,

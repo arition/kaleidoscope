@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 import anywidget
@@ -51,7 +51,17 @@ class PreviewWidget(anywidget.AnyWidget):
         if config is not None:
             self.set_trait("mode", config.mode)
             self.set_trait("active_clip_ids", list(config.active_clip_ids))
+        self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
+            "awaiting_ready"
+        )
         self.on_msg(self._handle_custom_message)
+
+    def _reject_frontend_message(self, error: ProtocolError) -> None:
+        self._frontend_state = "terminal"
+        self.set_trait("status", "error")
+        if self._session is not None:
+            self._session.close()
+        self.send(error_message(self.session_id, error))
 
     def _metadata_payload(self) -> dict[str, object] | None:
         if self._config is None:
@@ -91,6 +101,17 @@ class PreviewWidget(anywidget.AnyWidget):
         buffers: list[memoryview],
     ) -> None:
         del buffers
+        if self._frontend_state == "terminal":
+            self.send(
+                error_message(
+                    self.session_id,
+                    ProtocolError(
+                        "invalid_message",
+                        "Preview session is no longer accepting frontend messages.",
+                    ),
+                )
+            )
+            return
         try:
             message = parse_frontend_message(content)
             if message["session_id"] != self.session_id:
@@ -99,21 +120,60 @@ class PreviewWidget(anywidget.AnyWidget):
                     "Frontend message has an unknown session.",
                 )
         except ProtocolError as protocol_error:
-            self.set_trait("status", "error")
-            self.send(error_message(self.session_id, protocol_error))
+            self._reject_frontend_message(protocol_error)
             return
 
         if message["type"] == "ready":
+            if self._frontend_state != "awaiting_ready":
+                self._reject_frontend_message(
+                    ProtocolError(
+                        "invalid_message",
+                        "The ready handshake has already completed.",
+                    )
+                )
+                return
+            if not message["capabilities"]["image_bitmap"]:
+                self._reject_frontend_message(
+                    ProtocolError(
+                        "unsupported_codec",
+                        "This browser cannot decode preview images because "
+                        "createImageBitmap is unavailable.",
+                    )
+                )
+                return
+            if (
+                self._config is not None
+                and self._config.codec == "webp"
+                and not message["capabilities"]["webp"]
+            ):
+                self._reject_frontend_message(
+                    ProtocolError(
+                        "unsupported_codec",
+                        "This browser cannot decode WebP previews; use codec='jpeg'.",
+                    )
+                )
+                return
+            self._frontend_state = "ready"
             self.set_trait("status", "ready")
             self.send(metadata_message(self.session_id, self._metadata_payload()))
             return
 
-        if self._session is None:
-            session_error = ProtocolError(
-                "invalid_message",
-                "Frame requests require an initialized preview session.",
+        if self._frontend_state != "ready":
+            self._reject_frontend_message(
+                ProtocolError(
+                    "invalid_message",
+                    "Frame requests are not accepted before the ready handshake.",
+                )
             )
-            self.send(error_message(self.session_id, session_error))
+            return
+
+        if self._session is None:
+            self._reject_frontend_message(
+                ProtocolError(
+                    "invalid_message",
+                    "Frame requests require an initialized preview session.",
+                )
+            )
             return
 
         try:
@@ -124,8 +184,9 @@ class PreviewWidget(anywidget.AnyWidget):
                 clip_ids=message["clip_ids"],
             )
         except ValueError as exception:
-            request_error = ProtocolError("invalid_message", str(exception))
-            self.send(error_message(self.session_id, request_error))
+            self._reject_frontend_message(
+                ProtocolError("invalid_message", str(exception))
+            )
 
     def _send_session_message(
         self,
@@ -135,6 +196,7 @@ class PreviewWidget(anywidget.AnyWidget):
         self.send(content, buffers=buffers)
 
     def close(self) -> None:
+        self._frontend_state = "terminal"
         if self._session is not None:
             self._session.close()
         super().close()
