@@ -1,0 +1,89 @@
+[build-system]
+requires = [
+  "hatchling>=1.27",
+  "hatch-jupyter-builder>=0.9,<0.10",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaleidoscope"
+version = "0.1.0"
+description = "Real-time VapourSynth preview and comparison for Jupyter"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+  "anywidget>=0.11,<0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kaleidoscope"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/frontend",
+  "/src/kaleidoscope",
+  "/tests",
+  "/package.json",
+  "/package-lock.json",
+  "/tsconfig.json",
+  "/vitest.config.ts",
+]
+
+[tool.hatch.build.hooks.jupyter-builder]
+dependencies = ["hatch-jupyter-builder>=0.9,<0.10"]
+build-function = "hatch_jupyter_builder.npm_builder"
+ensured-targets = [
+  "src/kaleidoscope/static/index.js",
+  "src/kaleidoscope/static/index.css",
+]
+
+[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
+build_cmd = "build"
+
+[tool.hatch.envs.test]
+skip-install = true
+dependencies = [
+  "anywidget>=0.11,<0.12",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+]
+
+[tool.hatch.envs.test.env-vars]
+PYTHONPATH = "src"
+
+[tool.hatch.envs.test.scripts]
+pytest = "python -m pytest {args:tests/python}"
+
+[tool.hatch.envs.lint]
+detached = true
+dependencies = ["ruff>=0.11,<0.12"]
+
+[tool.hatch.envs.lint.scripts]
+check = [
+  "ruff check src tests/python",
+  "ruff format --check src tests/python",
+]
+
+[tool.hatch.envs.types]
+dependencies = [
+  "mypy>=1.15,<2",
+  "anywidget>=0.11,<0.12",
+]
+
+[tool.hatch.envs.types.scripts]
+check = "mypy src/kaleidoscope"
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests/python"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true

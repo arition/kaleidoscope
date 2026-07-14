@@ -1,0 +1,9 @@
+.hatch/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+coverage.xml
+dist/
+htmlcov/
+node_modules/

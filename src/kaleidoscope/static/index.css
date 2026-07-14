@@ -1,0 +1,22 @@
+/* frontend/styles.css */
+.kaleidoscope-widget {
+  box-sizing: border-box;
+  min-height: 6rem;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  color: var(--jp-ui-font-color1, #202124);
+  background:
+    linear-gradient(
+      135deg,
+      rgb(17 138 178 / 8%),
+      transparent 55%),
+    var(--jp-layout-color1, #ffffff);
+  border: 1px solid var(--jp-border-color2, #c9ced6);
+  border-radius: 6px;
+  font-family: var(--jp-ui-font-family, "IBM Plex Sans", sans-serif);
+}
+.kaleidoscope-status {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
