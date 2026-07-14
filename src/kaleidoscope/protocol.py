@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from math import isfinite
 from typing import Literal, NotRequired, TypedDict, TypeGuard, cast
 
 from .sources import ClipId
 
 PROTOCOL_VERSION: Literal[1] = 1
+MAX_FRAME_BUFFER_BYTES = 16 * 1024 * 1024
+MAX_FRAME_SET_BYTES = 64 * 1024 * 1024
 
 
 class Capabilities(TypedDict):
@@ -102,6 +105,15 @@ def _is_nonnegative_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def _is_nonnegative_number(value: object) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and isfinite(value)
+        and value >= 0
+    )
+
+
 def _is_clip_id(value: object) -> TypeGuard[ClipId]:
     return (isinstance(value, int) and not isinstance(value, bool)) or (
         isinstance(value, str) and bool(value)
@@ -159,12 +171,32 @@ def frame_set_message(
     request_id: int,
     generation: int,
     frame: int,
-    clip_id: ClipId,
-    mime: str,
-    byte_length: int,
-    render_ms: float,
-    encode_ms: float,
+    frames: Sequence[FrameManifest],
 ) -> dict[str, object]:
+    if not 1 <= len(frames) <= 4:
+        raise ValueError("A frame-set manifest requires between one and four frames.")
+    clip_ids: set[ClipId] = set()
+    total_bytes = 0
+    for buffer_index, manifest in enumerate(frames):
+        clip_id = manifest.get("clip_id")
+        byte_length = manifest.get("byte_length")
+        if (
+            not _is_clip_id(clip_id)
+            or clip_id in clip_ids
+            or manifest.get("buffer_index") != buffer_index
+            or manifest.get("mime") not in {"image/jpeg", "image/webp"}
+            or not isinstance(byte_length, int)
+            or isinstance(byte_length, bool)
+            or not 1 <= byte_length <= MAX_FRAME_BUFFER_BYTES
+            or not _is_nonnegative_number(manifest.get("render_ms"))
+            or not _is_nonnegative_number(manifest.get("encode_ms"))
+        ):
+            raise ValueError("Malformed frame-set manifest.")
+        clip_ids.add(clip_id)
+        total_bytes += byte_length
+    if total_bytes > MAX_FRAME_SET_BYTES:
+        raise ValueError("Frame-set payload exceeds the transport limit.")
+
     message: FrameSetMessage = {
         "protocol": PROTOCOL_VERSION,
         "type": "frame_set",
@@ -172,16 +204,7 @@ def frame_set_message(
         "request_id": request_id,
         "generation": generation,
         "frame": frame,
-        "frames": [
-            {
-                "clip_id": clip_id,
-                "buffer_index": 0,
-                "mime": mime,
-                "byte_length": byte_length,
-                "render_ms": render_ms,
-                "encode_ms": encode_ms,
-            }
-        ],
+        "frames": list(frames),
     }
     return cast(dict[str, object], message)
 

@@ -112,7 +112,22 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         }
         return;
       }
-      updateStatus(`Protocol error: ${message.message}`);
+      if (
+        message.request_id !== undefined &&
+        (currentRequest === undefined ||
+          message.request_id !== currentRequest.request_id ||
+          message.generation !== currentRequest.generation)
+      ) {
+        return;
+      }
+      const clip = metadata?.clips.find(
+        (candidate) => candidate.id === message.clip_id,
+      );
+      updateStatus(
+        clip === undefined
+          ? `Protocol error: ${message.message}`
+          : `${clip.label}: ${message.message}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
       updateStatus(`Protocol error: ${message}`);

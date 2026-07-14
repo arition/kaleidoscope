@@ -217,6 +217,71 @@ describe("protocol v1", () => {
     ).toThrowError(ProtocolError);
   });
 
+  it("rejects non-deterministic buffer indices for atomic frame sets", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 7,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 1,
+            mime: "image/jpeg",
+            byte_length: 4,
+            render_ms: 1.5,
+            encode_ms: 0.8,
+          },
+          {
+            clip_id: "Filtered",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: 4,
+            render_ms: 1.8,
+            encode_ms: 0.9,
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("preserves validated clip context on a recoverable error", () => {
+    expect(
+      parseBackendMessage({
+        protocol: 1,
+        type: "error",
+        session_id: "session-1",
+        request_id: 7,
+        generation: 2,
+        clip_id: "Filtered",
+        code: "render_failed",
+        message: "The preview frame could not be rendered.",
+        recoverable: true,
+      }),
+    ).toMatchObject({
+      request_id: 7,
+      generation: 2,
+      clip_id: "Filtered",
+    });
+  });
+
+  it("rejects incomplete recoverable error context", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "error",
+        session_id: "session-1",
+        request_id: 7,
+        code: "render_failed",
+        message: "The preview frame could not be rendered.",
+        recoverable: true,
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
   it("rejects binary payloads whose byte length differs from the manifest", () => {
     const message = parseBackendMessage({
       protocol: 1,

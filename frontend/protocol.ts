@@ -78,6 +78,9 @@ export interface ErrorMessage {
   code: string;
   message: string;
   recoverable: boolean;
+  request_id?: number;
+  generation?: number;
+  clip_id?: ClipId;
 }
 
 export interface FrameManifest {
@@ -217,7 +220,7 @@ function isFrameSetMessage(
   );
   return (
     new Set(bufferIndices).size === bufferIndices.length &&
-    bufferIndices.every((bufferIndex) => bufferIndex < frames.length) &&
+    bufferIndices.every((bufferIndex, index) => bufferIndex === index) &&
     new Set(clipIds).size === clipIds.length &&
     totalBytes <= MAX_FRAME_SET_BYTES
   );
@@ -362,6 +365,19 @@ export function parseBackendMessage(value: unknown): BackendMessage {
     typeof value.message === "string" &&
     typeof value.recoverable === "boolean"
   ) {
+    const hasRequestContext =
+      "request_id" in value || "generation" in value || "clip_id" in value;
+    if (
+      hasRequestContext &&
+      (!isNonnegativeInteger(value.request_id) ||
+        !isNonnegativeInteger(value.generation) ||
+        !isClipId(value.clip_id))
+    ) {
+      throw new ProtocolError(
+        "invalid_message",
+        "Malformed backend error context.",
+      );
+    }
     return value as unknown as ErrorMessage;
   }
 

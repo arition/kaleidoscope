@@ -6,7 +6,22 @@ let messageHandler;
 const showConversionWarning = new URLSearchParams(window.location.search).has(
   "conversion",
 );
+const showSideBySide = new URLSearchParams(window.location.search).has(
+  "side-by-side",
+);
 const clipId = showConversionWarning ? "Filtered" : "Source";
+const activeClipIds = showSideBySide ? ["Source", "Filtered"] : [clipId];
+
+const clip = (id, sourceFormat = "RGB24", warnings = []) => ({
+  id,
+  label: id,
+  source_format: sourceFormat,
+  source_width: 64,
+  source_height: 48,
+  output_width: 64,
+  output_height: 48,
+  warnings,
+});
 
 const emit = (message, buffers = []) => {
   messageHandler?.(message, buffers);
@@ -38,42 +53,44 @@ const model = {
           num_frames: 1,
           fps_num: 24,
           fps_den: 1,
-          mode: "single",
-          active_clip_ids: [clipId],
+          mode: showSideBySide ? "side-by-side" : "single",
+          active_clip_ids: activeClipIds,
           max_visible_clips: 4,
-          clips: [
-            {
-              id: clipId,
-              label: clipId,
-              source_format: showConversionWarning ? "YUV420P8" : "RGB24",
-              source_width: 64,
-              source_height: 48,
-              output_width: 64,
-              output_height: 48,
-              warnings: showConversionWarning
-                ? [
-                    {
-                      code: "automatic_rgb24_conversion",
-                      message:
-                        "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
-                    },
-                    {
-                      code: "assumed_color_metadata",
-                      message:
-                        "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
-                    },
-                  ]
-                : [],
-            },
-          ],
+          clips: showSideBySide
+            ? [clip("Source"), clip("Filtered")]
+            : [
+                clip(
+                  clipId,
+                  showConversionWarning ? "YUV420P8" : "RGB24",
+                  showConversionWarning
+                    ? [
+                        {
+                          code: "automatic_rgb24_conversion",
+                          message:
+                            "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
+                        },
+                        {
+                          code: "assumed_color_metadata",
+                          message:
+                            "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
+                        },
+                      ]
+                    : [],
+                ),
+              ],
         });
       });
       return;
     }
     if (message.type === "request_frame_set") {
-      void fetch("./frame.jpg")
-        .then((response) => response.arrayBuffer())
-        .then((buffer) => {
+      const fixtureNames = showSideBySide
+        ? ["frame.jpg", "filtered.jpg"]
+        : ["frame.jpg"];
+      void Promise.all(
+        fixtureNames.map((name) =>
+          fetch(`./${name}`).then((response) => response.arrayBuffer()),
+        ),
+      ).then((buffers) => {
           emit(
             {
               protocol: 1,
@@ -82,18 +99,16 @@ const model = {
               request_id: message.request_id,
               generation: message.generation,
               frame: message.frame,
-              frames: [
-                {
-                  clip_id: clipId,
-                  buffer_index: 0,
+              frames: activeClipIds.map((activeClipId, bufferIndex) => ({
+                  clip_id: activeClipId,
+                  buffer_index: bufferIndex,
                   mime: "image/jpeg",
-                  byte_length: buffer.byteLength,
+                  byte_length: buffers[bufferIndex].byteLength,
                   render_ms: 0,
                   encode_ms: 0,
-                },
-              ],
+                })),
             },
-            [new DataView(buffer)],
+            buffers.map((buffer) => new DataView(buffer)),
           );
         });
     }

@@ -4,7 +4,7 @@ import ctypes
 from concurrent.futures import Future
 from fractions import Fraction
 from io import BytesIO
-from threading import Event
+from threading import Event, Thread
 
 import pytest
 from PIL import Image
@@ -59,26 +59,44 @@ class FakeVideoNode:
         return self.future
 
 
-def make_config(node: FakeVideoNode) -> PreviewConfig:
+def make_config(
+    node: FakeVideoNode,
+    *additional_clips: tuple[str, FakeVideoNode],
+) -> PreviewConfig:
+    clips = [
+        NormalizedClip(
+            id="Source",
+            label="Source",
+            node=node,
+            source_format="RGB24",
+            source_width=1,
+            source_height=1,
+            output_width=1,
+            output_height=1,
+        )
+    ]
+    clips.extend(
+        NormalizedClip(
+            id=clip_id,
+            label=clip_id,
+            node=clip_node,
+            source_format="RGB24",
+            source_width=1,
+            source_height=1,
+            output_width=1,
+            output_height=1,
+        )
+        for clip_id, clip_node in additional_clips
+    )
+    active_clip_ids = tuple(clip.id for clip in clips)
     return PreviewConfig(
-        clips=(
-            NormalizedClip(
-                id="Source",
-                label="Source",
-                node=node,
-                source_format="RGB24",
-                source_width=1,
-                source_height=1,
-                output_width=1,
-                output_height=1,
-            ),
-        ),
+        clips=tuple(clips),
         num_frames=10,
         fps=Fraction(24, 1),
-        mode="single",
+        mode="single" if len(clips) == 1 else "side-by-side",
         primary="Source",
-        secondary=None,
-        active_clip_ids=("Source",),
+        secondary=None if len(clips) == 1 else clips[1].id,
+        active_clip_ids=active_clip_ids,
         overlay_opacity=0.5,
         max_visible_clips=4,
         quality=80,
@@ -139,6 +157,232 @@ def test_single_frame_request_is_async_encoded_and_releases_the_frame() -> None:
             [b"encoded:\x0c\x228"],
         )
     ]
+
+
+def test_frame_set_waits_for_every_clip_and_preserves_requested_order() -> None:
+    source_node = FakeVideoNode()
+    filtered_node = FakeVideoNode()
+    source_frame = FakeFrame()
+    filtered_frame = FakeFrame()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(source_node, ("Filtered", filtered_node)),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=8,
+        generation=2,
+        frame=3,
+        clip_ids=("Filtered", "Source"),
+    )
+
+    filtered_node.future.set_result(filtered_frame)
+
+    assert filtered_frame.closed is True
+    assert source_frame.closed is False
+    assert sent == []
+
+    source_node.future.set_result(source_frame)
+
+    assert source_frame.closed is True
+    assert sent == [
+        (
+            {
+                "protocol": 1,
+                "type": "frame_set",
+                "session_id": "session-1",
+                "request_id": 8,
+                "generation": 2,
+                "frame": 3,
+                "frames": [
+                    {
+                        "clip_id": "Filtered",
+                        "buffer_index": 0,
+                        "mime": "image/jpeg",
+                        "byte_length": 11,
+                        "render_ms": 0.0,
+                        "encode_ms": 0.0,
+                    },
+                    {
+                        "clip_id": "Source",
+                        "buffer_index": 1,
+                        "mime": "image/jpeg",
+                        "byte_length": 11,
+                        "render_ms": 0.0,
+                        "encode_ms": 0.0,
+                    },
+                ],
+            },
+            [b"encoded:\x0c\x228", b"encoded:\x0c\x228"],
+        )
+    ]
+
+
+def test_failed_frame_set_member_never_releases_a_partial_set() -> None:
+    source_node = FakeVideoNode()
+    filtered_node = FakeVideoNode()
+    source_frame = FakeFrame()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(source_node, ("Filtered", filtered_node)),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=9,
+        generation=2,
+        frame=3,
+        clip_ids=("Source", "Filtered"),
+    )
+    source_node.future.set_result(source_frame)
+    filtered_node.future.set_exception(RuntimeError("unsafe render details"))
+
+    assert source_frame.closed is True
+    assert sent == [
+        (
+            {
+                "protocol": 1,
+                "type": "error",
+                "session_id": "session-1",
+                "request_id": 9,
+                "generation": 2,
+                "clip_id": "Filtered",
+                "code": "render_failed",
+                "message": "The preview frame could not be rendered.",
+                "recoverable": True,
+            },
+            [],
+        )
+    ]
+
+
+def test_stale_frame_set_members_close_without_sending() -> None:
+    source_node = FakeVideoNode()
+    filtered_node = FakeVideoNode()
+    old_source_future = source_node.future
+    old_filtered_future = filtered_node.future
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(source_node, ("Filtered", filtered_node)),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=0,
+        clip_ids=("Source", "Filtered"),
+    )
+    source_node.future = Future()
+    filtered_node.future = Future()
+    session.request_frame_set(
+        request_id=2,
+        generation=1,
+        frame=1,
+        clip_ids=("Source", "Filtered"),
+    )
+
+    old_source_frame = FakeFrame()
+    old_filtered_frame = FakeFrame()
+    old_source_future.set_result(old_source_frame)
+    old_filtered_future.set_result(old_filtered_frame)
+
+    assert old_source_frame.closed is True
+    assert old_filtered_frame.closed is True
+    assert sent == []
+
+    new_source_frame = FakeFrame()
+    new_filtered_frame = FakeFrame()
+    source_node.future.set_result(new_source_frame)
+    filtered_node.future.set_result(new_filtered_frame)
+
+    assert new_source_frame.closed is True
+    assert new_filtered_frame.closed is True
+    assert len(sent) == 1
+    message, buffers = sent[0]
+    assert message["type"] == "frame_set"
+    assert message["request_id"] == 2
+    assert message["generation"] == 1
+    assert message["frame"] == 1
+    assert len(buffers) == 2
+
+
+def test_frame_set_rejects_duplicate_and_unknown_clip_ids() -> None:
+    source_node = FakeVideoNode()
+    filtered_node = FakeVideoNode()
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(source_node, ("Filtered", filtered_node)),
+        send=lambda message, buffers: None,
+    )
+
+    with pytest.raises(ValueError, match="duplicate clip IDs"):
+        session.request_frame_set(
+            request_id=1,
+            generation=0,
+            frame=0,
+            clip_ids=("Source", "Source"),
+        )
+    with pytest.raises(ValueError, match="Unknown clip ID"):
+        session.request_frame_set(
+            request_id=2,
+            generation=0,
+            frame=0,
+            clip_ids=("Source", "Missing"),
+        )
+
+
+def test_transport_callback_can_close_the_session_without_deadlocking() -> None:
+    node = FakeVideoNode()
+    frame = FakeFrame()
+    session: PreviewSession
+
+    def send(message: dict[str, object], buffers: list[bytes]) -> None:
+        del message, buffers
+        session.close()
+
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=send,
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+
+    completion = Thread(target=lambda: node.future.set_result(frame), daemon=True)
+    completion.start()
+    completion.join(timeout=1)
+
+    assert completion.is_alive() is False
+    assert frame.closed is True
 
 
 def test_real_vapoursynth_rgb24_frame_is_encoded_with_expected_color() -> None:

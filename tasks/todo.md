@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: T4 complete; T5 is next
+Status: T5 complete; T6 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.3
 
@@ -47,11 +47,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Emit automatic-conversion and assumed-color-metadata warnings.
   - [x] Render visible accessible clip-specific warnings and test YUV preview.
 
-- [ ] **T5 - Atomic two-clip side-by-side preview** (depends on T4)
-  - [ ] Request both clips under one frame-set identity.
-  - [ ] Assemble a validated manifest with deterministic binary buffers.
-  - [ ] Stage decoded images and commit only complete synchronized sets.
-  - [ ] Prove stale, missing, failed, or undecodable members never partially paint.
+- [x] **T5 - Atomic two-clip side-by-side preview** (depends on T4)
+  - [x] Request both clips under one frame-set identity.
+  - [x] Assemble a validated manifest with deterministic binary buffers.
+  - [x] Stage decoded images and commit only complete synchronized sets.
+  - [x] Prove stale, missing, failed, or undecodable members never partially paint.
 
 - [ ] **T6 - Pipeline benchmark and architecture gate** (depends on T5)
   - [ ] Benchmark one/two/four clips and RGB24/fallback paths.

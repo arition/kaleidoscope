@@ -5,6 +5,7 @@ import pytest
 from kaleidoscope.protocol import (
     PROTOCOL_VERSION,
     ProtocolError,
+    frame_set_message,
     parse_frontend_message,
 )
 
@@ -58,6 +59,72 @@ def test_parse_frontend_message_accepts_a_single_frame_set_request() -> None:
     assert message["clip_ids"] == ["Source"]
 
 
+def test_frame_set_message_preserves_ordered_buffer_mapping() -> None:
+    message = frame_set_message(
+        "session-1",
+        request_id=7,
+        generation=2,
+        frame=11,
+        frames=[
+            {
+                "clip_id": "Filtered",
+                "buffer_index": 0,
+                "mime": "image/jpeg",
+                "byte_length": 4,
+                "render_ms": 2.0,
+                "encode_ms": 1.0,
+            },
+            {
+                "clip_id": "Source",
+                "buffer_index": 1,
+                "mime": "image/webp",
+                "byte_length": 5,
+                "render_ms": 3.0,
+                "encode_ms": 1.5,
+            },
+        ],
+    )
+
+    assert message["frames"] == [
+        {
+            "clip_id": "Filtered",
+            "buffer_index": 0,
+            "mime": "image/jpeg",
+            "byte_length": 4,
+            "render_ms": 2.0,
+            "encode_ms": 1.0,
+        },
+        {
+            "clip_id": "Source",
+            "buffer_index": 1,
+            "mime": "image/webp",
+            "byte_length": 5,
+            "render_ms": 3.0,
+            "encode_ms": 1.5,
+        },
+    ]
+
+
+def test_frame_set_message_rejects_non_deterministic_indices() -> None:
+    with pytest.raises(ValueError, match="Malformed frame-set manifest"):
+        frame_set_message(
+            "session-1",
+            request_id=7,
+            generation=2,
+            frame=11,
+            frames=[
+                {
+                    "clip_id": "Source",
+                    "buffer_index": 1,
+                    "mime": "image/jpeg",
+                    "byte_length": 4,
+                    "render_ms": 2.0,
+                    "encode_ms": 1.0,
+                }
+            ],
+        )
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -83,6 +150,16 @@ def test_parse_frontend_message_accepts_a_single_frame_set_request() -> None:
             "generation": 0,
             "frame": -1,
             "clip_ids": ["Source"],
+            "reason": "seek",
+        },
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 0,
+            "generation": 0,
+            "frame": 0,
+            "clip_ids": ["Source", "Source"],
             "reason": "seek",
         },
     ],

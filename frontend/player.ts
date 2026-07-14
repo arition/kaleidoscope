@@ -102,6 +102,7 @@ export function renderMetadata(
 
   const clips = document.createElement("ul");
   clips.className = "kaleidoscope-clips";
+  clips.dataset.mode = message.mode;
   clips.setAttribute("aria-label", "Preview clips");
   clips.append(
     ...message.clips.map((clip) =>
@@ -122,6 +123,14 @@ export function renderMetadata(
 interface DecodedFrame {
   manifest: FrameSetMessage["frames"][number];
   bitmap: ImageBitmap;
+}
+
+interface StagedFrame {
+  decoded: DecodedFrame;
+  currentCanvas: HTMLCanvasElement;
+  stagedCanvas: HTMLCanvasElement;
+  context: CanvasRenderingContext2D;
+  parent: Node;
 }
 
 async function decodeFrames(
@@ -168,17 +177,71 @@ export async function paintFrameSet(
     if (!shouldCommit()) {
       return false;
     }
-    for (const frame of decoded) {
-      const canvas = view.canvases.get(frame.manifest.clip_id);
-      const context = canvas?.getContext("2d");
-      if (canvas === undefined || context === null || context === undefined) {
+    const targets: StagedFrame[] = decoded.map((frame) => {
+      const currentCanvas = view.canvases.get(frame.manifest.clip_id);
+      const parent = currentCanvas?.parentNode;
+      if (
+        currentCanvas === undefined ||
+        parent === null ||
+        parent === undefined ||
+        currentCanvas.getContext("2d") === null
+      ) {
         throw new Error("The active preview canvas is unavailable.");
       }
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(frame.bitmap, 0, 0, canvas.width, canvas.height);
-      canvas.setAttribute(
+      const stagedCanvas = currentCanvas.cloneNode(false) as HTMLCanvasElement;
+      const context = stagedCanvas.getContext("2d");
+      if (context === null) {
+        throw new Error("The active preview canvas is unavailable.");
+      }
+      return {
+        decoded: frame,
+        currentCanvas,
+        stagedCanvas,
+        context,
+        parent,
+      };
+    });
+    for (const { decoded: frame, stagedCanvas, context } of targets) {
+      context.drawImage(
+        frame.bitmap,
+        0,
+        0,
+        stagedCanvas.width,
+        stagedCanvas.height,
+      );
+      stagedCanvas.setAttribute(
         "aria-label",
         `${view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`,
+      );
+    }
+    if (!shouldCommit()) {
+      return false;
+    }
+
+    const committed: StagedFrame[] = [];
+    try {
+      for (const target of targets) {
+        target.parent.replaceChild(
+          target.stagedCanvas,
+          target.currentCanvas,
+        );
+        committed.push(target);
+      }
+    } catch (error) {
+      for (const target of committed.reverse()) {
+        if (target.stagedCanvas.parentNode === target.parent) {
+          target.parent.replaceChild(
+            target.currentCanvas,
+            target.stagedCanvas,
+          );
+        }
+      }
+      throw error;
+    }
+    for (const target of targets) {
+      view.canvases.set(
+        target.decoded.manifest.clip_id,
+        target.stagedCanvas,
       );
     }
     return true;

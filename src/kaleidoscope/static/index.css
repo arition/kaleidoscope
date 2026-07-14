@@ -54,6 +54,9 @@
   margin: 0;
   list-style: none;
 }
+.kaleidoscope-clips[data-mode=side-by-side] {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
 .kaleidoscope-clip {
   display: grid;
   gap: 0.5rem;

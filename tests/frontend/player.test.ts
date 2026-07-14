@@ -254,4 +254,221 @@ describe("metadata presentation", () => {
     );
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it("atomically paints a complete two-clip frame set", async () => {
+    const drawOrder: string[] = [];
+    const firstClose = vi.fn();
+    const secondClose = vi.fn();
+    const firstBitmap = { close: firstClose } as unknown as ImageBitmap;
+    const secondBitmap = { close: secondClose } as unknown as ImageBitmap;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      () => {
+        return {
+          clearRect: vi.fn(),
+          drawImage: vi.fn((bitmap: ImageBitmap) => {
+            drawOrder.push(bitmap === firstBitmap ? "Source" : "Filtered");
+          }),
+        } as unknown as CanvasRenderingContext2D;
+      },
+    );
+    let resolveFirstDecode: (bitmap: ImageBitmap) => void = () => {};
+    let resolveSecondDecode: (bitmap: ImageBitmap) => void = () => {};
+    const firstDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveFirstDecode = resolve;
+    });
+    const secondDecode = new Promise<ImageBitmap>((resolve) => {
+      resolveSecondDecode = resolve;
+    });
+    const createImageBitmap = vi
+      .fn()
+      .mockReturnValueOnce(firstDecode)
+      .mockReturnValueOnce(secondDecode);
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "side-by-side",
+      active_clip_ids: ["Source", "Filtered"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 2,
+          source_height: 1,
+          output_width: 2,
+          output_height: 1,
+          warnings: [],
+        },
+        {
+          id: "Filtered",
+          label: "Filtered",
+          source_format: "RGB24",
+          source_width: 2,
+          source_height: 1,
+          output_width: 2,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+
+    const sourcePayload = new Uint8Array([0xff, 0xd8, 0x01, 0xd9]);
+    const filteredPayload = new Uint8Array([0xff, 0xd8, 0x02, 0xd9]);
+    model.emit(
+      {
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 0,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: sourcePayload.byteLength,
+            render_ms: 1,
+            encode_ms: 1,
+          },
+          {
+            clip_id: "Filtered",
+            buffer_index: 1,
+            mime: "image/jpeg",
+            byte_length: filteredPayload.byteLength,
+            render_ms: 2,
+            encode_ms: 1,
+          },
+        ],
+      },
+      [
+        new DataView(sourcePayload.buffer),
+        new DataView(filteredPayload.buffer),
+      ],
+    );
+
+    resolveFirstDecode(firstBitmap);
+    await Promise.resolve();
+    expect(drawOrder).toEqual([]);
+
+    resolveSecondDecode(secondBitmap);
+    await vi.waitFor(() =>
+      expect(drawOrder).toEqual(["Source", "Filtered"]),
+    );
+    expect(firstClose).toHaveBeenCalledOnce();
+    expect(secondClose).toHaveBeenCalledOnce();
+  });
+
+  it("does not paint any member when an active canvas is unavailable", async () => {
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement) {
+        if (this.parentElement?.dataset.clipId === "Filtered") {
+          return null;
+        }
+        return {
+          clearRect: vi.fn(),
+          drawImage,
+        } as unknown as CanvasRenderingContext2D;
+      },
+    );
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi
+        .fn()
+        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+    );
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 1,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "side-by-side",
+      active_clip_ids: ["Source", "Filtered"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+        {
+          id: "Filtered",
+          label: "Filtered",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+
+    const first = new Uint8Array([1]);
+    const second = new Uint8Array([2]);
+    model.emit(
+      {
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 0,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: first.byteLength,
+            render_ms: 1,
+            encode_ms: 1,
+          },
+          {
+            clip_id: "Filtered",
+            buffer_index: 1,
+            mime: "image/jpeg",
+            byte_length: second.byteLength,
+            render_ms: 1,
+            encode_ms: 1,
+          },
+        ],
+      },
+      [new DataView(first.buffer), new DataView(second.buffer)],
+    );
+
+    await vi.waitFor(() =>
+      expect(element.querySelector("[role='status']")?.textContent).toContain(
+        "active preview canvas is unavailable",
+      ),
+    );
+    expect(drawImage).not.toHaveBeenCalled();
+  });
 });

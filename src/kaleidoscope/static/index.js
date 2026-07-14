@@ -48,7 +48,7 @@ function isFrameSetMessage(value) {
     (total, frame) => total + frame.byte_length,
     0
   );
-  return new Set(bufferIndices).size === bufferIndices.length && bufferIndices.every((bufferIndex) => bufferIndex < frames.length) && new Set(clipIds).size === clipIds.length && totalBytes <= MAX_FRAME_SET_BYTES;
+  return new Set(bufferIndices).size === bufferIndices.length && bufferIndices.every((bufferIndex, index) => bufferIndex === index) && new Set(clipIds).size === clipIds.length && totalBytes <= MAX_FRAME_SET_BYTES;
 }
 function hasPreviewMetadataFields(value) {
   return [
@@ -133,6 +133,13 @@ function parseBackendMessage(value) {
     return value;
   }
   if (value.type === "error" && typeof value.session_id === "string" && value.session_id.length > 0 && typeof value.code === "string" && value.code.length > 0 && typeof value.message === "string" && typeof value.recoverable === "boolean") {
+    const hasRequestContext = "request_id" in value || "generation" in value || "clip_id" in value;
+    if (hasRequestContext && (!isNonnegativeInteger(value.request_id) || !isNonnegativeInteger(value.generation) || !isClipId(value.clip_id))) {
+      throw new ProtocolError(
+        "invalid_message",
+        "Malformed backend error context."
+      );
+    }
     return value;
   }
   throw new ProtocolError("invalid_message", "Malformed backend message.");
@@ -208,6 +215,7 @@ function renderMetadata(root, message) {
   timeline.textContent = `${message.num_frames} frames | ${message.fps_num}/${message.fps_den} fps`;
   const clips = document.createElement("ul");
   clips.className = "kaleidoscope-clips";
+  clips.dataset.mode = message.mode;
   clips.setAttribute("aria-label", "Preview clips");
   clips.append(
     ...message.clips.map(
@@ -257,17 +265,65 @@ async function paintFrameSet(view, message, buffers, shouldCommit) {
     if (!shouldCommit()) {
       return false;
     }
-    for (const frame of decoded) {
-      const canvas = view.canvases.get(frame.manifest.clip_id);
-      const context = canvas?.getContext("2d");
-      if (canvas === void 0 || context === null || context === void 0) {
+    const targets = decoded.map((frame) => {
+      const currentCanvas = view.canvases.get(frame.manifest.clip_id);
+      const parent = currentCanvas?.parentNode;
+      if (currentCanvas === void 0 || parent === null || parent === void 0 || currentCanvas.getContext("2d") === null) {
         throw new Error("The active preview canvas is unavailable.");
       }
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(frame.bitmap, 0, 0, canvas.width, canvas.height);
-      canvas.setAttribute(
+      const stagedCanvas = currentCanvas.cloneNode(false);
+      const context = stagedCanvas.getContext("2d");
+      if (context === null) {
+        throw new Error("The active preview canvas is unavailable.");
+      }
+      return {
+        decoded: frame,
+        currentCanvas,
+        stagedCanvas,
+        context,
+        parent
+      };
+    });
+    for (const { decoded: frame, stagedCanvas, context } of targets) {
+      context.drawImage(
+        frame.bitmap,
+        0,
+        0,
+        stagedCanvas.width,
+        stagedCanvas.height
+      );
+      stagedCanvas.setAttribute(
         "aria-label",
         `${view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`
+      );
+    }
+    if (!shouldCommit()) {
+      return false;
+    }
+    const committed = [];
+    try {
+      for (const target of targets) {
+        target.parent.replaceChild(
+          target.stagedCanvas,
+          target.currentCanvas
+        );
+        committed.push(target);
+      }
+    } catch (error) {
+      for (const target of committed.reverse()) {
+        if (target.stagedCanvas.parentNode === target.parent) {
+          target.parent.replaceChild(
+            target.currentCanvas,
+            target.stagedCanvas
+          );
+        }
+      }
+      throw error;
+    }
+    for (const target of targets) {
+      view.canvases.set(
+        target.decoded.manifest.clip_id,
+        target.stagedCanvas
       );
     }
     return true;
@@ -359,7 +415,15 @@ function render({ model, el, signal }) {
         }
         return;
       }
-      updateStatus(`Protocol error: ${message.message}`);
+      if (message.request_id !== void 0 && (currentRequest === void 0 || message.request_id !== currentRequest.request_id || message.generation !== currentRequest.generation)) {
+        return;
+      }
+      const clip = metadata?.clips.find(
+        (candidate) => candidate.id === message.clip_id
+      );
+      updateStatus(
+        clip === void 0 ? `Protocol error: ${message.message}` : `${clip.label}: ${message.message}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
       updateStatus(`Protocol error: ${message}`);
