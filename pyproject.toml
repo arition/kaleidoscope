@@ -13,6 +13,7 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "VapourSynth>=77,<78",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -46,6 +47,7 @@ dependencies = [
   "anywidget>=0.11,<0.12",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",
+  "VapourSynth>=77,<78",
 ]
 
 [tool.hatch.envs.test.env-vars]

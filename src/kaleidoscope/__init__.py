@@ -1,5 +1,6 @@
 from __future__ import annotations
 
-from .widget import PreviewWidget, preview
+from .api import preview
+from .widget import PreviewWidget
 
 __all__ = ["PreviewWidget", "preview"]

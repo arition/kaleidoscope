@@ -5,6 +5,7 @@ import {
   parseBackendMessage,
   ProtocolError,
 } from "./protocol.js";
+import { renderMetadata } from "./player.js";
 import "./styles.css";
 
 function createStatus(text: string): HTMLElement {
@@ -36,6 +37,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         throw new ProtocolError("invalid_message", "Backend message has an unknown session.");
       }
       if (message.type === "metadata") {
+        if ("clips" in message) {
+          renderMetadata(el, message);
+          return;
+        }
         status.textContent = "Kaleidoscope is ready.";
         return;
       }

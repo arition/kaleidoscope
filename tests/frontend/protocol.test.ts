@@ -26,12 +26,68 @@ describe("protocol v1", () => {
         type: "metadata",
         session_id: "session-1",
         status: "initialized",
+        num_frames: 240,
+        fps_num: 24000,
+        fps_den: 1001,
+        mode: "side-by-side",
+        active_clip_ids: ["Source", "Filtered"],
+        max_visible_clips: 4,
+        clips: [
+          {
+            id: "Source",
+            label: "Source",
+            source_format: "RGB24",
+            source_width: 1920,
+            source_height: 1080,
+            output_width: 960,
+            output_height: 540,
+            warnings: [],
+          },
+          {
+            id: "Filtered",
+            label: "Filtered",
+            source_format: "RGB24",
+            source_width: 1280,
+            source_height: 720,
+            output_width: 960,
+            output_height: 540,
+            warnings: [],
+          },
+        ],
       }),
     ).toEqual({
       protocol: 1,
       type: "metadata",
       session_id: "session-1",
       status: "initialized",
+      num_frames: 240,
+      fps_num: 24000,
+      fps_den: 1001,
+      mode: "side-by-side",
+      active_clip_ids: ["Source", "Filtered"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1920,
+          source_height: 1080,
+          output_width: 960,
+          output_height: 540,
+          warnings: [],
+        },
+        {
+          id: "Filtered",
+          label: "Filtered",
+          source_format: "RGB24",
+          source_width: 1280,
+          source_height: 720,
+          output_width: 960,
+          output_height: 540,
+          warnings: [],
+        },
+      ],
     });
   });
 
@@ -52,6 +108,35 @@ describe("protocol v1", () => {
         protocol: 1,
         type: "metadata",
         session_id: "session-1",
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects metadata with invalid clip dimensions", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 240,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "single",
+        active_clip_ids: [0],
+        max_visible_clips: 4,
+        clips: [
+          {
+            id: 0,
+            label: "Clip 0",
+            source_format: "RGB24",
+            source_width: 0,
+            source_height: 1080,
+            output_width: 960,
+            output_height: 540,
+            warnings: [],
+          },
+        ],
       }),
     ).toThrowError(ProtocolError);
   });

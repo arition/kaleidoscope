@@ -27,7 +27,6 @@ def capture_messages(
 def test_package_exports_widget_and_preview_entry_point() -> None:
     assert kaleidoscope.PreviewWidget is PreviewWidget
     assert kaleidoscope.preview is preview
-    assert isinstance(preview(), PreviewWidget)
 
 
 def test_widget_does_not_send_metadata_before_ready(monkeypatch: Any) -> None:

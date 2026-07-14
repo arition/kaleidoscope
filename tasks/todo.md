@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: T1 complete; T2 is next  
+Status: T2 complete; T3 is next  
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.3
 
@@ -29,11 +29,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Bundle ESM/CSS into wheel and sdist without runtime network requests.
   - [x] Establish and run every command in the verification command contract.
 
-- [ ] **T2 - Normalized sources and visible metadata** (depends on T1)
-  - [ ] Normalize a node, sequence, mapping, and registered-output snapshot.
-  - [ ] Preserve deterministic IDs/labels and ignore registered audio.
-  - [ ] Validate timeline, format, dimensions, mode cardinality, and selections.
-  - [ ] Render clip/timeline metadata and test stable error codes.
+- [x] **T2 - Normalized sources and visible metadata** (depends on T1)
+  - [x] Normalize a node, sequence, mapping, and registered-output snapshot.
+  - [x] Preserve deterministic IDs/labels and ignore registered audio.
+  - [x] Validate timeline, format, dimensions, mode cardinality, and selections.
+  - [x] Render clip/timeline metadata and test stable error codes.
 
 - [ ] **T3 - Single RGB24 frame end to end** (depends on T2)
   - [ ] Use caller-prepared target-size `RGB24` without conversion.

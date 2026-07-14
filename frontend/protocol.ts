@@ -19,6 +19,36 @@ export interface MetadataMessage {
   status: "initialized";
 }
 
+export type ClipId = number | string;
+
+export type ComparisonMode =
+  | "single"
+  | "side-by-side"
+  | "wipe"
+  | "overlay"
+  | "difference";
+
+export interface ClipMetadata {
+  id: ClipId;
+  label: string;
+  source_format: string;
+  source_width: number;
+  source_height: number;
+  output_width: number;
+  output_height: number;
+  warnings: unknown[];
+}
+
+export interface PreviewMetadataMessage extends MetadataMessage {
+  num_frames: number;
+  fps_num: number;
+  fps_den: number;
+  mode: ComparisonMode;
+  active_clip_ids: ClipId[];
+  max_visible_clips: number;
+  clips: ClipMetadata[];
+}
+
 export interface ErrorMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "error";
@@ -28,7 +58,10 @@ export interface ErrorMessage {
   recoverable: boolean;
 }
 
-export type BackendMessage = MetadataMessage | ErrorMessage;
+export type BackendMessage =
+  | MetadataMessage
+  | PreviewMetadataMessage
+  | ErrorMessage;
 
 export class ProtocolError extends Error {
   constructor(
@@ -42,6 +75,85 @@ export class ProtocolError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0;
+}
+
+function isClipId(value: unknown): value is ClipId {
+  return (
+    (Number.isInteger(value) && typeof value === "number") ||
+    (typeof value === "string" && value.length > 0)
+  );
+}
+
+function isComparisonMode(value: unknown): value is ComparisonMode {
+  return (
+    value === "single" ||
+    value === "side-by-side" ||
+    value === "wipe" ||
+    value === "overlay" ||
+    value === "difference"
+  );
+}
+
+function isClipMetadata(value: unknown): value is ClipMetadata {
+  return (
+    isRecord(value) &&
+    isClipId(value.id) &&
+    typeof value.label === "string" &&
+    value.label.length > 0 &&
+    typeof value.source_format === "string" &&
+    value.source_format.length > 0 &&
+    isPositiveInteger(value.source_width) &&
+    isPositiveInteger(value.source_height) &&
+    isPositiveInteger(value.output_width) &&
+    isPositiveInteger(value.output_height) &&
+    Array.isArray(value.warnings)
+  );
+}
+
+function hasPreviewMetadataFields(value: Record<string, unknown>): boolean {
+  return [
+    "num_frames",
+    "fps_num",
+    "fps_den",
+    "mode",
+    "active_clip_ids",
+    "max_visible_clips",
+    "clips",
+  ].some((key) => key in value);
+}
+
+function isPreviewMetadataMessage(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & PreviewMetadataMessage {
+  if (
+    !isPositiveInteger(value.num_frames) ||
+    !isPositiveInteger(value.fps_num) ||
+    !isPositiveInteger(value.fps_den) ||
+    !isComparisonMode(value.mode) ||
+    !isPositiveInteger(value.max_visible_clips) ||
+    value.max_visible_clips > 4 ||
+    !Array.isArray(value.active_clip_ids) ||
+    value.active_clip_ids.length === 0 ||
+    !value.active_clip_ids.every(isClipId) ||
+    !Array.isArray(value.clips) ||
+    value.clips.length === 0 ||
+    !value.clips.every(isClipMetadata)
+  ) {
+    return false;
+  }
+
+  const clipIds = value.clips.map((clip) => clip.id);
+  const activeIds = value.active_clip_ids;
+  return (
+    new Set(clipIds).size === clipIds.length &&
+    new Set(activeIds).size === activeIds.length &&
+    activeIds.length <= value.max_visible_clips &&
+    activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId))
+  );
 }
 
 export function createReadyMessage(
@@ -78,6 +190,12 @@ export function parseBackendMessage(value: unknown): BackendMessage {
     value.session_id.length > 0 &&
     value.status === "initialized"
   ) {
+    if (hasPreviewMetadataFields(value)) {
+      if (!isPreviewMetadataMessage(value)) {
+        throw new ProtocolError("invalid_message", "Malformed preview metadata.");
+      }
+      return value;
+    }
     return value as unknown as MetadataMessage;
   }
 

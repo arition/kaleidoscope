@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, NotRequired, TypedDict, TypeGuard, cast
 
 PROTOCOL_VERSION: Literal[1] = 1
@@ -22,6 +23,13 @@ class MetadataMessage(TypedDict):
     type: Literal["metadata"]
     session_id: str
     status: Literal["initialized"]
+    num_frames: NotRequired[int]
+    fps_num: NotRequired[int]
+    fps_den: NotRequired[int]
+    mode: NotRequired[str]
+    active_clip_ids: NotRequired[list[int | str]]
+    max_visible_clips: NotRequired[int]
+    clips: NotRequired[list[dict[str, object]]]
 
 
 class ErrorMessage(TypedDict):
@@ -85,13 +93,19 @@ def parse_frontend_message(value: object) -> ReadyMessage:
     return cast(ReadyMessage, value)
 
 
-def metadata_message(session_id: str) -> MetadataMessage:
-    return {
+def metadata_message(
+    session_id: str,
+    payload: Mapping[str, object] | None = None,
+) -> MetadataMessage:
+    message: dict[str, object] = {
         "protocol": PROTOCOL_VERSION,
         "type": "metadata",
         "session_id": session_id,
         "status": "initialized",
     }
+    if payload is not None:
+        message.update(payload)
+    return cast(MetadataMessage, message)
 
 
 def error_message(session_id: str, error: ProtocolError) -> ErrorMessage:
