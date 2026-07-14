@@ -12,6 +12,19 @@ export interface ReadyMessage {
   capabilities: FrontendCapabilities;
 }
 
+export type FrameRequestReason = "seek" | "playback" | "prefetch";
+
+export interface RequestFrameSetMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "request_frame_set";
+  session_id: string;
+  request_id: number;
+  generation: number;
+  frame: number;
+  clip_ids: ClipId[];
+  reason: FrameRequestReason;
+}
+
 export interface MetadataMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "metadata";
@@ -53,15 +66,38 @@ export interface ErrorMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "error";
   session_id: string;
-  code: "invalid_message" | "protocol_mismatch";
+  code: string;
   message: string;
   recoverable: boolean;
+}
+
+export interface FrameManifest {
+  clip_id: ClipId;
+  buffer_index: number;
+  mime: "image/jpeg" | "image/webp";
+  byte_length: number;
+  render_ms: number;
+  encode_ms: number;
+}
+
+export interface FrameSetMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "frame_set";
+  session_id: string;
+  request_id: number;
+  generation: number;
+  frame: number;
+  frames: FrameManifest[];
 }
 
 export type BackendMessage =
   | MetadataMessage
   | PreviewMetadataMessage
+  | FrameSetMessage
   | ErrorMessage;
+
+export const MAX_FRAME_BUFFER_BYTES = 16 * 1024 * 1024;
+export const MAX_FRAME_SET_BYTES = 64 * 1024 * 1024;
 
 export class ProtocolError extends Error {
   constructor(
@@ -79,6 +115,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) > 0;
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
+}
+
+function isNonnegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function isClipId(value: unknown): value is ClipId {
@@ -111,6 +155,51 @@ function isClipMetadata(value: unknown): value is ClipMetadata {
     isPositiveInteger(value.output_width) &&
     isPositiveInteger(value.output_height) &&
     Array.isArray(value.warnings)
+  );
+}
+
+function isFrameManifest(value: unknown): value is FrameManifest {
+  return (
+    isRecord(value) &&
+    isClipId(value.clip_id) &&
+    isNonnegativeInteger(value.buffer_index) &&
+    (value.mime === "image/jpeg" || value.mime === "image/webp") &&
+    isPositiveInteger(value.byte_length) &&
+    value.byte_length <= MAX_FRAME_BUFFER_BYTES &&
+    isNonnegativeFiniteNumber(value.render_ms) &&
+    isNonnegativeFiniteNumber(value.encode_ms)
+  );
+}
+
+function isFrameSetMessage(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & FrameSetMessage {
+  const frames = value.frames;
+  if (
+    typeof value.session_id !== "string" ||
+    value.session_id.length === 0 ||
+    !isNonnegativeInteger(value.request_id) ||
+    !isNonnegativeInteger(value.generation) ||
+    !isNonnegativeInteger(value.frame) ||
+    !Array.isArray(frames) ||
+    !frames.length ||
+    frames.length > 4 ||
+    !frames.every(isFrameManifest)
+  ) {
+    return false;
+  }
+
+  const bufferIndices = frames.map((frame) => frame.buffer_index);
+  const clipIds = frames.map((frame) => frame.clip_id);
+  const totalBytes = frames.reduce(
+    (total, frame) => total + frame.byte_length,
+    0,
+  );
+  return (
+    new Set(bufferIndices).size === bufferIndices.length &&
+    bufferIndices.every((bufferIndex) => bufferIndex < frames.length) &&
+    new Set(clipIds).size === clipIds.length &&
+    totalBytes <= MAX_FRAME_SET_BYTES
   );
 }
 
@@ -168,6 +257,47 @@ export function createReadyMessage(
   };
 }
 
+export function createFrameSetRequest(
+  sessionId: string,
+  requestId: number,
+  generation: number,
+  frame: number,
+  clipIds: ClipId[],
+  reason: FrameRequestReason,
+): RequestFrameSetMessage {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "request_frame_set",
+    session_id: sessionId,
+    request_id: requestId,
+    generation,
+    frame,
+    clip_ids: [...clipIds],
+    reason,
+  };
+}
+
+export function validateFrameSetBuffers(
+  message: FrameSetMessage,
+  buffers: DataView[],
+): void {
+  if (buffers.length !== message.frames.length) {
+    throw new ProtocolError(
+      "invalid_message",
+      "Frame payload count does not match its manifest.",
+    );
+  }
+  for (const frame of message.frames) {
+    const buffer = buffers[frame.buffer_index];
+    if (buffer === undefined || buffer.byteLength !== frame.byte_length) {
+      throw new ProtocolError(
+        "invalid_message",
+        "Frame payload length does not match its manifest.",
+      );
+    }
+  }
+}
+
 export function parseBackendMessage(value: unknown): BackendMessage {
   if (!isRecord(value)) {
     throw new ProtocolError("invalid_message", "Backend message must be an object.");
@@ -199,11 +329,16 @@ export function parseBackendMessage(value: unknown): BackendMessage {
     return value as unknown as MetadataMessage;
   }
 
+  if (value.type === "frame_set" && isFrameSetMessage(value)) {
+    return value;
+  }
+
   if (
     value.type === "error" &&
     typeof value.session_id === "string" &&
     value.session_id.length > 0 &&
-    (value.code === "invalid_message" || value.code === "protocol_mismatch") &&
+    typeof value.code === "string" &&
+    value.code.length > 0 &&
     typeof value.message === "string" &&
     typeof value.recoverable === "boolean"
   ) {

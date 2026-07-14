@@ -13,6 +13,7 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "Pillow>=12.1,<13",
   "VapourSynth>=77,<78",
 ]
 
@@ -26,6 +27,7 @@ include = [
   "/tests",
   "/package.json",
   "/package-lock.json",
+  "/playwright.config.ts",
   "/tsconfig.json",
   "/vitest.config.ts",
 ]
@@ -45,6 +47,7 @@ build_cmd = "build"
 skip-install = true
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "Pillow>=12.1,<13",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",
   "VapourSynth>=77,<78",
@@ -54,6 +57,7 @@ dependencies = [
 PYTHONPATH = "src"
 
 [tool.hatch.envs.test.scripts]
+e2e-fixture = "python tests/e2e/generate_fixture.py"
 pytest = "python -m pytest {args:tests/python}"
 
 [tool.hatch.envs.lint]
@@ -70,6 +74,7 @@ check = [
 dependencies = [
   "mypy>=1.15,<2",
   "anywidget>=0.11,<0.12",
+  "Pillow>=12.1,<13",
 ]
 
 [tool.hatch.envs.types.scripts]

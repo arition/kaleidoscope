@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: T2 complete; T3 is next  
+Status: T3 complete; T4 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.3
 
@@ -35,11 +35,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Validate timeline, format, dimensions, mode cardinality, and selections.
   - [x] Render clip/timeline metadata and test stable error codes.
 
-- [ ] **T3 - Single RGB24 frame end to end** (depends on T2)
-  - [ ] Use caller-prepared target-size `RGB24` without conversion.
-  - [ ] Retrieve frame 0 asynchronously and close every `VideoFrame` path.
-  - [ ] Adapt strided planar RGB and encode a bounded MIME-typed payload.
-  - [ ] Decode/paint in the browser and verify known canvas pixels.
+- [x] **T3 - Single RGB24 frame end to end** (depends on T2)
+  - [x] Use caller-prepared target-size `RGB24` without conversion.
+  - [x] Retrieve frame 0 asynchronously and close every `VideoFrame` path.
+  - [x] Adapt strided planar RGB and encode a bounded MIME-typed payload.
+  - [x] Decode/paint in the browser and verify known canvas pixels.
 
 - [ ] **T4 - Warned automatic RGB24 fallback** (depends on T3)
   - [ ] Keep direct and resize-only RGB24 paths warning-free.

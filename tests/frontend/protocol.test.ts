@@ -5,6 +5,7 @@ import {
   ProtocolError,
   createReadyMessage,
   parseBackendMessage,
+  validateFrameSetBuffers,
 } from "../../frontend/protocol.js";
 
 describe("protocol v1", () => {
@@ -138,6 +139,83 @@ describe("protocol v1", () => {
           },
         ],
       }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("accepts a bounded single-frame manifest", () => {
+    expect(
+      parseBackendMessage({
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 7,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: 631,
+            render_ms: 1.5,
+            encode_ms: 0.8,
+          },
+        ],
+      }),
+    ).toMatchObject({ type: "frame_set", frame: 0 });
+  });
+
+  it("rejects a frame manifest with an empty payload", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 7,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: 0,
+            render_ms: 1.5,
+            encode_ms: 0.8,
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects binary payloads whose byte length differs from the manifest", () => {
+    const message = parseBackendMessage({
+      protocol: 1,
+      type: "frame_set",
+      session_id: "session-1",
+      request_id: 7,
+      generation: 0,
+      frame: 0,
+      frames: [
+        {
+          clip_id: "Source",
+          buffer_index: 0,
+          mime: "image/jpeg",
+          byte_length: 4,
+          render_ms: 1.5,
+          encode_ms: 0.8,
+        },
+      ],
+    });
+    if (message.type !== "frame_set") {
+      throw new Error("Expected a frame-set message.");
+    }
+
+    expect(() =>
+      validateFrameSetBuffers(
+        message,
+        [new DataView(new Uint8Array([1, 2, 3]).buffer)],
+      ),
     ).toThrowError(ProtocolError);
   });
 });

@@ -57,7 +57,7 @@ export class FakeModel implements AnyModel {
     this.sent.push(message);
   }
 
-  emit(message: unknown): void {
-    this.messageHandler?.(message, []);
+  emit(message: unknown, buffers: DataView[] = []): void {
+    this.messageHandler?.(message, buffers);
   }
 }

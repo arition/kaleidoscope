@@ -7,3 +7,6 @@ coverage.xml
 dist/
 htmlcov/
 node_modules/
+playwright-report/
+test-results/
+tests/e2e/harness/frame.jpg

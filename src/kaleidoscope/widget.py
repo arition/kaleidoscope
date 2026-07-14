@@ -13,6 +13,7 @@ from .protocol import (
     metadata_message,
     parse_frontend_message,
 )
+from .session import PreviewSession
 
 if TYPE_CHECKING:
     from .sources import PreviewConfig
@@ -38,6 +39,15 @@ class PreviewWidget(anywidget.AnyWidget):
     ) -> None:
         super().__init__(session_id=session_id or uuid4().hex, **kwargs)
         self._config = config
+        self._session = (
+            PreviewSession(
+                session_id=self.session_id,
+                config=config,
+                send=self._send_session_message,
+            )
+            if config is not None
+            else None
+        )
         if config is not None:
             self.set_trait("mode", config.mode)
             self.set_trait("active_clip_ids", list(config.active_clip_ids))
@@ -80,12 +90,45 @@ class PreviewWidget(anywidget.AnyWidget):
             if message["session_id"] != self.session_id:
                 raise ProtocolError(
                     "invalid_message",
-                    "Ready message has an unknown session.",
+                    "Frontend message has an unknown session.",
                 )
-        except ProtocolError as error:
+        except ProtocolError as protocol_error:
             self.set_trait("status", "error")
-            self.send(error_message(self.session_id, error))
+            self.send(error_message(self.session_id, protocol_error))
             return
 
-        self.set_trait("status", "ready")
-        self.send(metadata_message(self.session_id, self._metadata_payload()))
+        if message["type"] == "ready":
+            self.set_trait("status", "ready")
+            self.send(metadata_message(self.session_id, self._metadata_payload()))
+            return
+
+        if self._session is None:
+            session_error = ProtocolError(
+                "invalid_message",
+                "Frame requests require an initialized preview session.",
+            )
+            self.send(error_message(self.session_id, session_error))
+            return
+
+        try:
+            self._session.request_frame_set(
+                request_id=message["request_id"],
+                generation=message["generation"],
+                frame=message["frame"],
+                clip_ids=message["clip_ids"],
+            )
+        except ValueError as exception:
+            request_error = ProtocolError("invalid_message", str(exception))
+            self.send(error_message(self.session_id, request_error))
+
+    def _send_session_message(
+        self,
+        content: dict[str, object],
+        buffers: list[bytes],
+    ) -> None:
+        self.send(content, buffers=buffers)
+
+    def close(self) -> None:
+        if self._session is not None:
+            self._session.close()
+        super().close()

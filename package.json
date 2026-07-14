@@ -6,10 +6,12 @@
   "scripts": {
     "build": "npm run typecheck && esbuild frontend/index.ts --bundle --format=esm --target=es2022 --outfile=src/kaleidoscope/static/index.js && esbuild frontend/styles.css --bundle --outfile=src/kaleidoscope/static/index.css",
     "test": "vitest",
+    "test:e2e": "npm run build && PATH=\"$PWD/.venv/bin:$PATH\" hatch run test:e2e-fixture && playwright test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@anywidget/types": "0.4.0",
+    "@playwright/test": "1.55.1",
     "esbuild": "0.28.1",
     "jsdom": "26.1.0",
     "typescript": "5.9.3",

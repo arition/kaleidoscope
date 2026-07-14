@@ -1,8 +1,14 @@
 import type {
   ClipId,
   ClipMetadata,
+  FrameSetMessage,
   PreviewMetadataMessage,
 } from "./protocol.js";
+
+export interface PlayerView {
+  readonly metadata: PreviewMetadataMessage;
+  readonly canvases: Map<ClipId, HTMLCanvasElement>;
+}
 
 function idsMatch(left: ClipId, right: ClipId): boolean {
   return left === right;
@@ -11,6 +17,7 @@ function idsMatch(left: ClipId, right: ClipId): boolean {
 function createClipRow(
   clip: ClipMetadata,
   activeClipIds: ClipId[],
+  canvases: Map<ClipId, HTMLCanvasElement>,
 ): HTMLElement {
   const row = document.createElement("li");
   const isActive = activeClipIds.some((clipId) => idsMatch(clipId, clip.id));
@@ -38,14 +45,29 @@ function createClipRow(
   dimensions.className = "kaleidoscope-clip__dimensions";
   dimensions.textContent = `${clip.source_width} x ${clip.source_height}`;
 
-  row.append(identity, dimensions);
+  const details = document.createElement("div");
+  details.className = "kaleidoscope-clip__details";
+  details.append(identity, dimensions);
+  row.append(details);
+
+  if (isActive) {
+    const canvas = document.createElement("canvas");
+    canvas.className = "kaleidoscope-canvas";
+    canvas.width = clip.output_width;
+    canvas.height = clip.output_height;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", `${clip.label}, frame 0`);
+    row.append(canvas);
+    canvases.set(clip.id, canvas);
+  }
   return row;
 }
 
 export function renderMetadata(
   root: HTMLElement,
   message: PreviewMetadataMessage,
-): void {
+): PlayerView {
+  const canvases = new Map<ClipId, HTMLCanvasElement>();
   const header = document.createElement("header");
   header.className = "kaleidoscope-header";
 
@@ -69,7 +91,7 @@ export function renderMetadata(
   clips.setAttribute("aria-label", "Preview clips");
   clips.append(
     ...message.clips.map((clip) =>
-      createClipRow(clip, message.active_clip_ids),
+      createClipRow(clip, message.active_clip_ids, canvases),
     ),
   );
 
@@ -80,4 +102,75 @@ export function renderMetadata(
   status.textContent = "Kaleidoscope is ready.";
 
   root.replaceChildren(header, timeline, clips, status);
+  return { metadata: message, canvases };
+}
+
+interface DecodedFrame {
+  manifest: FrameSetMessage["frames"][number];
+  bitmap: ImageBitmap;
+}
+
+async function decodeFrames(
+  message: FrameSetMessage,
+  buffers: DataView[],
+): Promise<DecodedFrame[]> {
+  const results = await Promise.allSettled(
+    message.frames.map(async (manifest) => {
+      const buffer = buffers[manifest.buffer_index];
+      const payload = new Uint8Array(buffer.byteLength);
+      payload.set(
+        new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+      );
+      const blob = new Blob([payload], {
+        type: manifest.mime,
+      });
+      const bitmap = await createImageBitmap(blob);
+      return { manifest, bitmap };
+    }),
+  );
+  const decoded = results.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+  const rejected = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (rejected !== undefined) {
+    for (const frame of decoded) {
+      frame.bitmap.close();
+    }
+    throw rejected.reason;
+  }
+  return decoded;
+}
+
+export async function paintFrameSet(
+  view: PlayerView,
+  message: FrameSetMessage,
+  buffers: DataView[],
+  shouldCommit: () => boolean,
+): Promise<boolean> {
+  const decoded = await decodeFrames(message, buffers);
+  try {
+    if (!shouldCommit()) {
+      return false;
+    }
+    for (const frame of decoded) {
+      const canvas = view.canvases.get(frame.manifest.clip_id);
+      const context = canvas?.getContext("2d");
+      if (canvas === undefined || context === null || context === undefined) {
+        throw new Error("The active preview canvas is unavailable.");
+      }
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(frame.bitmap, 0, 0, canvas.width, canvas.height);
+      canvas.setAttribute(
+        "aria-label",
+        `${view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`,
+      );
+    }
+    return true;
+  } finally {
+    for (const frame of decoded) {
+      frame.bitmap.close();
+    }
+  }
 }

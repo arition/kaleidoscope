@@ -1,11 +1,15 @@
 import type { RenderProps } from "@anywidget/types";
 
 import {
+  createFrameSetRequest,
   createReadyMessage,
   parseBackendMessage,
   ProtocolError,
+  validateFrameSetBuffers,
 } from "./protocol.js";
-import { renderMetadata } from "./player.js";
+import type { FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
+import { paintFrameSet, renderMetadata } from "./player.js";
+import type { PlayerView } from "./player.js";
 import "./styles.css";
 
 function createStatus(text: string): HTMLElement {
@@ -30,7 +34,23 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     return;
   }
 
-  const onMessage = (value: unknown): void => {
+  let metadata: PreviewMetadataMessage | undefined;
+  let playerView: PlayerView | undefined;
+  let currentRequest:
+    | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
+    | undefined;
+
+  const updateStatus = (text: string): void => {
+    const liveStatus = el.querySelector<HTMLElement>("[role='status']");
+    if (liveStatus !== null) {
+      liveStatus.textContent = text;
+    }
+  };
+
+  const handleMessage = async (
+    value: unknown,
+    buffers: DataView[],
+  ): Promise<void> => {
     try {
       const message = parseBackendMessage(value);
       if (message.session_id !== sessionId) {
@@ -38,17 +58,69 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       }
       if (message.type === "metadata") {
         if ("clips" in message) {
-          renderMetadata(el, message);
+          metadata = message;
+          playerView = renderMetadata(el, message);
+          currentRequest = { request_id: 0, generation: 0, frame: 0 };
+          model.send(
+            createFrameSetRequest(
+              sessionId,
+              currentRequest.request_id,
+              currentRequest.generation,
+              currentRequest.frame,
+              message.active_clip_ids,
+              "seek",
+            ),
+          );
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
         return;
       }
-      status.textContent = `Protocol error: ${message.message}`;
+      if (message.type === "frame_set") {
+        validateFrameSetBuffers(message, buffers);
+        if (metadata === undefined || playerView === undefined) {
+          throw new ProtocolError(
+            "invalid_message",
+            "Frame payload arrived before preview metadata.",
+          );
+        }
+        const expected = currentRequest;
+        const expectedClipIds = metadata.active_clip_ids;
+        const manifestClipIds = message.frames.map((frame) => frame.clip_id);
+        const isCurrent = (): boolean =>
+          !signal.aborted &&
+          expected !== undefined &&
+          currentRequest === expected &&
+          message.request_id === expected.request_id &&
+          message.generation === expected.generation &&
+          message.frame === expected.frame &&
+          manifestClipIds.length === expectedClipIds.length &&
+          manifestClipIds.every(
+            (clipId, index) => clipId === expectedClipIds[index],
+          );
+        if (!isCurrent()) {
+          return;
+        }
+        const painted = await paintFrameSet(
+          playerView,
+          message,
+          buffers,
+          isCurrent,
+        );
+        if (painted) {
+          updateStatus(`Frame ${message.frame} ready.`);
+        }
+        return;
+      }
+      updateStatus(`Protocol error: ${message.message}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
-      status.textContent = `Protocol error: ${message}`;
+      updateStatus(`Protocol error: ${message}`);
     }
+  };
+
+  const onMessage = (value: unknown, buffers: DataView[]): void => {
+    void handleMessage(value, buffers);
   };
 
   model.on("msg:custom", onMessage);

@@ -20,14 +20,14 @@
 }
 
 .kaleidoscope-header,
-.kaleidoscope-clip,
+.kaleidoscope-clip__details,
 .kaleidoscope-clip__identity {
   display: flex;
   align-items: center;
 }
 
 .kaleidoscope-header,
-.kaleidoscope-clip {
+.kaleidoscope-clip__details {
   justify-content: space-between;
 }
 
@@ -60,9 +60,15 @@
 }
 
 .kaleidoscope-clip {
-  min-height: 2.25rem;
-  padding: 0.25rem 0.5rem;
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.5rem;
   border-left: 2px solid transparent;
+}
+
+.kaleidoscope-clip__details {
+  min-height: 1.75rem;
 }
 
 .kaleidoscope-clip[data-active="true"] {
@@ -91,6 +97,15 @@
   color: var(--jp-ui-font-color2, #5f6368);
   font-variant-numeric: tabular-nums;
   font-size: 0.75rem;
+}
+
+.kaleidoscope-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(70vh, 720px);
+  object-fit: contain;
+  background: #111111;
 }
 
 .kaleidoscope-status--ready {
