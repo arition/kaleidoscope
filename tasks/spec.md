@@ -1,7 +1,7 @@
 # Kaleidoscope: Real-Time VapourSynth Preview for Jupyter
 
-Status: Approved for implementation  
-Spec revision: 0.3  
+Status: T6 benchmark amendment awaiting G1 approval
+Spec revision: 0.4 draft
 Research baseline: July 2026
 
 ## 1. Approval Gate
@@ -9,6 +9,8 @@ Research baseline: July 2026
 This document is the implementation contract for the first release. No package scaffolding, dependency installation, or product code should begin until the user approves this spec or requests revisions.
 
 The user delegated unanswered product decisions to the implementer. Those decisions are marked **Proposed** and remain reviewable at approval time.
+
+Revision 0.4 records the Task 6 benchmark selections for encoding, interleave, and transport. They are implemented and measured, but Task 7 must not begin until the user approves them at G1.
 
 Approval should confirm these consequential choices:
 
@@ -372,15 +374,17 @@ The exact preview resize kernel should be a quality/performance setting. Default
 
 Initial transport is one encoded image per active clip in each requested frame set:
 
-- Baseline encoder: Pillow JPEG, 4:2:0 or 4:4:4 policy chosen through benchmarks, default quality 80.
+- T6-selected baseline, pending G1: Pillow JPEG with 4:2:0 chroma subsampling and default quality 80.
 - Decode in the browser using `createImageBitmap(Blob)` when supported, then draw to a `<canvas>`.
 - Revoke/release `Blob`, `ImageBitmap`, and prior paint resources promptly.
 - Include alpha only in a future codec/path; MVP preview is opaque RGB.
 - Keep each clip as a separate image so the browser can switch comparison modes and adjust wipe/opacity without a kernel round trip.
 
-The encoder adapter receives `RGB24` frames from either the caller-prepared fast path or the warned fallback node. VapourSynth `RGB24` frames are planar and may be strided. The adapter should copy each visible row from R, G, and B planes into a contiguous interleaved byte buffer before Pillow encoding. **Proposed:** require NumPy for the row/plane interleave because it is likely materially faster and simpler to test than Python loops. This dependency must be confirmed by the first benchmark spike; remove it if a buffer-only implementation meets targets.
+The encoder adapter receives `RGB24` frames from either the caller-prepared fast path or the warned fallback node. VapourSynth `RGB24` frames are planar and may be strided. The adapter copies each visible row from R, G, and B planes into a contiguous interleaved byte buffer before Pillow encoding. T6 selects NumPy `>=2.4,<3` for this operation, pending G1: at 1280x720 its median was 0.96 ms versus 3.72 ms for the viable buffer-only implementation, a 3.88x speedup and 2.76 ms median saving. The buffer-only implementation remains in the benchmark as a comparator, not as a runtime fallback.
 
-JPEG is a hypothesis, not an irreversible protocol choice. During the performance spike, compare JPEG with WebP where browser and Pillow support are reliable. Keep the protocol MIME-typed so an encoder can change without redesigning transport. Do not add a continuous H.264/WebCodecs pipeline until image transport fails the MVP targets.
+T6 compared JPEG 4:2:0, JPEG 4:4:4, and speed-focused WebP at quality 80. At 1280x720, median encode time and payload were 2.17 ms/17.9 KiB, 3.44 ms/27.2 KiB, and 13.18 ms/4.8 KiB respectively, with similar browser decode p95. JPEG 4:2:0 is selected because it minimizes CPU while avoiding the larger 4:4:4 payload. The protocol remains MIME-typed so an encoder can change without redesigning transport.
+
+The image-per-frame protocol remains selected pending G1. The simulated local request-to-paint path measured 15.55 ms median/20.59 ms p95 for one 1280x720 direct RGB24 clip and 16.28 ms median/19.53 ms p95 for two synchronized 960x540 clips. Backend-paced and browser-inclusive latest-wins modeling delivered the target rates without drops for the supplied lightweight graphs. The comm component is explicitly an in-process buffer-copy simulation; real Jupyter comm latency remains a host-integration measurement and does not disappear from the release checklist.
 
 ### 6.7 Scheduling and backpressure
 
@@ -479,8 +483,8 @@ Avoid a general event bus, dependency-injection framework, or plugin system in t
 | VapourSynth | `>=77,<78` initially | Frame graph and async retrieval | User/environment dependency; do not bundle native plugins. Widen after compatibility testing. |
 | anywidget | `>=0.11,<0.12` | Portable Jupyter widget | Provides custom binary messages and lifecycle signal. |
 | traitlets | `>=5.15,<6` | Low-rate synchronized widget state | anywidget dependency, declared only if imported directly. |
-| Pillow | Pin compatible current stable range after scaffold | JPEG/WebP encoding | Verify required codec features in CI. |
-| NumPy | Current Python-compatible range, proposed | Plane interleave and stride-safe conversion | Keep only if benchmark spike demonstrates value. |
+| Pillow | `>=12.1,<13` | JPEG/WebP encoding | T6 selects JPEG 4:2:0 at quality 80; verify codec features in CI. |
+| NumPy | `>=2.4,<3` | Plane interleave and stride-safe conversion | T6 selects it for a measured 3.88x 720p interleave speedup, pending G1. |
 | Browser APIs | Canvas, Blob, `createImageBitmap`, Fullscreen, Page Visibility | Decode, paint, lifecycle | Provide image-element fallback if `createImageBitmap` is absent. |
 
 The package must not install VapourSynth system libraries or third-party source/resize plugins. Installation documentation should explain that a working VapourSynth environment is prerequisite.
@@ -753,6 +757,8 @@ Create a benchmark suite that records, but does not make noisy shared-runner tim
 
 Publish the benchmark machine, clips, settings, and raw percentile summary. The first implementation milestone is a pipeline spike; do not invest in full UI polish until it demonstrates the performance targets or produces a documented transport pivot.
 
+T6 publishes the summarized result in `tasks/benchmark-report.md` and raw samples in `benchmarks/results/t6-pipeline.json`. The measured recommendation is JPEG 4:2:0 at quality 80, NumPy interleave, and retention of MIME-typed image-per-frame transport, all pending G1 approval.
+
 ### 12.6 Packaging tests
 
 - Build wheel and sdist.
@@ -859,3 +865,9 @@ Before implementation, the reviewer should approve or amend:
 - [x] `kaleidoscope` package/distribution name.
 - [x] MIT license.
 - [x] Planned milestones and testing strategy.
+
+### 16.1 G1 Benchmark Decision
+
+- [ ] Approve Pillow JPEG 4:2:0 at quality 80 as the MVP encoder policy.
+- [ ] Approve NumPy `>=2.4,<3` as a runtime dependency for RGB24 interleave.
+- [ ] Approve retaining MIME-typed image-per-frame transport with real Jupyter comm latency deferred to host integration testing.

@@ -10,6 +10,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "benchmarks/**/*.ts",
     "frontend/**/*.ts",
     "tests/frontend/**/*.ts",
     "tests/e2e/**/*.ts",

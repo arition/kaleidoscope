@@ -1,8 +1,8 @@
 # Kaleidoscope Task List
 
-Status: T5 complete; T6 is next
+Status: T6 complete; stopped at G1 for human approval
 Source plan: `tasks/plan.md`  
-Source spec: `tasks/spec.md`, revision 0.3
+Source spec: `tasks/spec.md`, revision 0.4 draft
 
 Do not start product implementation until Gate 0 is complete. Check a task only after its acceptance criteria and listed verification pass.
 
@@ -53,11 +53,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Stage decoded images and commit only complete synchronized sets.
   - [x] Prove stale, missing, failed, or undecodable members never partially paint.
 
-- [ ] **T6 - Pipeline benchmark and architecture gate** (depends on T5)
-  - [ ] Benchmark one/two/four clips and RGB24/fallback paths.
-  - [ ] Compare JPEG/WebP, chroma policies, and NumPy/buffer-only interleave.
-  - [ ] Record render-through-paint percentiles, bytes, CPU, lag, and drops.
-  - [ ] Publish the decision and complete G1 before continuing.
+- [x] **T6 - Pipeline benchmark and architecture gate** (depends on T5)
+  - [x] Benchmark one/two/four clips and RGB24/fallback paths.
+  - [x] Compare JPEG/WebP, chroma policies, and NumPy/buffer-only interleave.
+  - [x] Record render-through-paint percentiles, bytes, CPU, lag, and drops.
+  - [x] Publish the decision and stop at G1 before continuing.
 
 - [ ] **T7 - Exact paused navigation** (depends on T6 and G1 passing)
   - [ ] Add timeline, frame/time entry, stepping, and first/last controls.

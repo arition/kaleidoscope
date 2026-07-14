@@ -13,6 +13,7 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
   "VapourSynth>=77,<78",
 ]
@@ -22,8 +23,10 @@ packages = ["src/kaleidoscope"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "/benchmarks",
   "/frontend",
   "/src/kaleidoscope",
+  "/tasks/benchmark-report.md",
   "/tests",
   "/package.json",
   "/package-lock.json",
@@ -47,6 +50,7 @@ build_cmd = "build"
 skip-install = true
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",
@@ -74,6 +78,7 @@ check = [
 dependencies = [
   "mypy>=1.15,<2",
   "anywidget>=0.11,<0.12",
+  "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
 ]
 

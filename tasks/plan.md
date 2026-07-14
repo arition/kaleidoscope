@@ -1,6 +1,6 @@
 # Kaleidoscope Implementation Plan
 
-Status: Approved implementation sequence  
+Status: T1-T6 complete; stopped for G1 approval
 Source: `tasks/spec.md`, revision 0.3  
 Planning scope: Tasks T1-T6 may proceed; stop for human approval at G1
 
@@ -205,20 +205,20 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Benchmark inputs, machine details, resolutions, quality settings, warm-up, sample counts, and percentile calculations are reproducible.
-- [ ] Caller-prepared RGB24 and fallback conversion costs are measured separately.
-- [ ] JPEG 4:2:0/4:4:4 and WebP are compared where Pillow/browser support is reliable.
-- [ ] NumPy and a viable buffer-only plane interleave are compared before NumPy becomes permanent.
-- [ ] One 1280x720 paused preview targets median under 150 ms and p95 under 250 ms.
-- [ ] Two 960x540 paused previews target median under 225 ms and p95 under 350 ms.
-- [ ] Playback feasibility is measured for one/two/four active clips, including bytes, CPU, lag, and drops.
-- [ ] A written decision records encoder, chroma policy, interleave dependency, defaults, and whether the image protocol remains viable.
-- [ ] If targets materially fail, implementation stops and `tasks/spec.md` is revised before Task 7.
+- [x] Benchmark inputs, machine details, resolutions, quality settings, warm-up, sample counts, and percentile calculations are reproducible.
+- [x] Caller-prepared RGB24 and fallback conversion costs are measured separately.
+- [x] JPEG 4:2:0/4:4:4 and WebP are compared where Pillow/browser support is reliable.
+- [x] NumPy and a viable buffer-only plane interleave are compared before NumPy becomes permanent.
+- [x] One 1280x720 paused preview targets median under 150 ms and p95 under 250 ms.
+- [x] Two 960x540 paused previews target median under 225 ms and p95 under 350 ms.
+- [x] Playback feasibility is measured for one/two/four active clips, including bytes, CPU, lag, and drops.
+- [x] A written decision records encoder, chroma policy, interleave dependency, defaults, and whether the image protocol remains viable.
+- [x] Targets pass, so no transport revision is required before G1.
 
 **Verification:**
 
-- [ ] Benchmark command completes and writes raw plus summarized results.
-- [ ] Results can be reproduced from a clean environment using documented commands.
+- [x] Benchmark command completes and writes raw plus summarized results.
+- [x] Results can be reproduced from a clean environment using documented commands.
 - [ ] Human approves the gate decision before Task 7 begins.
 
 ## T7: Exact Paused Navigation

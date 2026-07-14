@@ -3,6 +3,8 @@ from __future__ import annotations
 import ctypes
 from typing import Protocol
 
+import numpy as np
+
 
 class FrameAdapterError(ValueError):
     pass
@@ -36,23 +38,16 @@ def interleave_rgb24(frame: RGB24Frame) -> bytes:
     if frame.width <= 0 or frame.height <= 0:
         raise FrameAdapterError("Frame dimensions must be positive.")
 
-    planes: list[bytes] = []
-    strides: list[int] = []
+    interleaved = np.empty((frame.height, frame.width, 3), dtype=np.uint8)
     for plane in range(3):
         stride = frame.get_stride(plane)
         if stride < frame.width:
             raise FrameAdapterError("Frame plane stride is shorter than its width.")
         address = _pointer_address(frame.get_read_ptr(plane))
-        planes.append(ctypes.string_at(address, stride * frame.height))
-        strides.append(stride)
-
-    interleaved = bytearray(frame.width * frame.height * 3)
-    output_row_size = frame.width * 3
-    for row in range(frame.height):
-        output_start = row * output_row_size
-        for plane, data in enumerate(planes):
-            input_start = row * strides[plane]
-            interleaved[output_start + plane : output_start + output_row_size : 3] = (
-                data[input_start : input_start + frame.width]
-            )
-    return bytes(interleaved)
+        buffer_type = ctypes.c_uint8 * (stride * frame.height)
+        source = np.ctypeslib.as_array(buffer_type.from_address(address)).reshape(
+            frame.height,
+            stride,
+        )
+        interleaved[:, :, plane] = source[:, : frame.width]
+    return interleaved.tobytes()
