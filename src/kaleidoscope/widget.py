@@ -72,7 +72,13 @@ class PreviewWidget(anywidget.AnyWidget):
                     "source_height": clip.source_height,
                     "output_width": clip.output_width,
                     "output_height": clip.output_height,
-                    "warnings": [],
+                    "warnings": [
+                        {
+                            "code": warning.code,
+                            "message": warning.message,
+                        }
+                        for warning in clip.warnings
+                    ],
                 }
                 for clip in self._config.clips
             ],

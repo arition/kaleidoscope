@@ -142,6 +142,35 @@ describe("protocol v1", () => {
     ).toThrowError(ProtocolError);
   });
 
+  it("rejects metadata with an unknown warning code", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 1,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "single",
+        active_clip_ids: [0],
+        max_visible_clips: 4,
+        clips: [
+          {
+            id: 0,
+            label: "Clip 0",
+            source_format: "YUV420P8",
+            source_width: 640,
+            source_height: 360,
+            output_width: 640,
+            output_height: 360,
+            warnings: [{ code: "unknown", message: "Unexpected warning." }],
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
   it("accepts a bounded single-frame manifest", () => {
     expect(
       parseBackendMessage({

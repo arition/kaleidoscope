@@ -23,12 +23,18 @@ type ResolvedMode = Literal[
     "overlay",
     "difference",
 ]
+type ColorFamily = Literal["gray", "rgb", "yuv"]
 
 _LOGGER = logging.getLogger(__name__)
 _COMPARISON_MODES: frozenset[str] = frozenset(
     {"auto", "single", "side-by-side", "wipe", "overlay", "difference"}
 )
 _ALIGNED_MODES: frozenset[str] = frozenset({"wipe", "overlay", "difference"})
+_MATRIX_RGB = 0
+_MATRIX_BT709 = 1
+_TRANSFER_BT709 = 1
+_RANGE_LIMITED = 0
+_RANGE_FULL = 1
 
 
 class KaleidoscopeError(ValueError):
@@ -38,11 +44,29 @@ class KaleidoscopeError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class ColorMetadata:
+    matrix: int | None = None
+    transfer: int | None = None
+    range: int | None = None
+    color_family: ColorFamily | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClipWarning:
+    code: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class VapourSynthRuntime:
     video_node_type: type[Any]
     video_output_type: type[Any]
     audio_node_type: type[Any]
     get_outputs: Callable[[], Mapping[int, object]]
+    read_color_metadata: Callable[[object], ColorMetadata]
+    prepare_rgb24: Callable[
+        [object, int, int, int | None, int | None, int | None], object
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +79,8 @@ class NormalizedClip:
     source_height: int
     output_width: int
     output_height: int
+    preview_format: str = "RGB24"
+    warnings: tuple[ClipWarning, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +102,68 @@ class PreviewConfig:
 
 def load_vapoursynth_runtime() -> VapourSynthRuntime:
     vapoursynth = importlib.import_module("vapoursynth")
+
+    def read_color_metadata(node: Any) -> ColorMetadata:
+        frame = node.get_frame(0)
+        try:
+            return ColorMetadata(
+                matrix=_optional_int_prop(frame.props, "_Matrix"),
+                transfer=_optional_int_prop(frame.props, "_Transfer"),
+                range=_optional_int_prop(frame.props, "_Range"),
+                color_family=_vapoursynth_color_family(
+                    node.format.color_family,
+                    vapoursynth,
+                ),
+            )
+        finally:
+            frame.close()
+
+    def prepare_rgb24(
+        node: Any,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> object:
+        arguments: dict[str, object] = {
+            "width": width,
+            "height": height,
+            "format": vapoursynth.RGB24,
+        }
+        if matrix is not None:
+            arguments["matrix_in"] = matrix
+        if transfer is not None:
+            arguments["transfer_in"] = transfer
+        if color_range is not None:
+            arguments["range_in"] = color_range
+        return node.resize.Lanczos(**arguments)
+
     return VapourSynthRuntime(
         video_node_type=vapoursynth.VideoNode,
         video_output_type=vapoursynth.VideoOutputTuple,
         audio_node_type=vapoursynth.AudioNode,
         get_outputs=vapoursynth.get_outputs,
+        read_color_metadata=read_color_metadata,
+        prepare_rgb24=prepare_rgb24,
     )
+
+
+def _optional_int_prop(props: Any, key: str) -> int | None:
+    try:
+        return int(props[key])
+    except KeyError:
+        return None
+
+
+def _vapoursynth_color_family(value: object, vapoursynth: Any) -> ColorFamily:
+    if value == vapoursynth.GRAY:
+        return "gray"
+    if value == vapoursynth.RGB:
+        return "rgb"
+    if value == vapoursynth.YUV:
+        return "yuv"
+    raise ValueError("Unsupported VapourSynth color family.")
 
 
 def _is_clip_id(value: object) -> bool:
@@ -182,6 +264,123 @@ def _output_dimensions(
     return max(1, int(source_width * scale)), max(1, int(source_height * scale))
 
 
+def _join_assumptions(assumptions: list[str]) -> str:
+    if len(assumptions) == 1:
+        return assumptions[0]
+    if len(assumptions) == 2:
+        return f"{assumptions[0]} and {assumptions[1]}"
+    return f"{', '.join(assumptions[:-1])}, and {assumptions[-1]}"
+
+
+def _infer_color_family(source_format: str) -> ColorFamily:
+    if source_format.startswith("RGB"):
+        return "rgb"
+    if source_format.startswith("GRAY"):
+        return "gray"
+    return "yuv"
+
+
+def _prepare_preview_node(
+    node: object,
+    *,
+    label: str,
+    source_format: str,
+    source_width: int,
+    source_height: int,
+    output_width: int,
+    output_height: int,
+    runtime: VapourSynthRuntime,
+) -> tuple[object, tuple[ClipWarning, ...]]:
+    if (
+        source_format == "RGB24"
+        and source_width == output_width
+        and source_height == output_height
+    ):
+        return node, ()
+
+    matrix: int | None = None
+    transfer: int | None = None
+    color_range: int | None = None
+    warnings: tuple[ClipWarning, ...] = ()
+    if source_format != "RGB24":
+        try:
+            metadata = runtime.read_color_metadata(node)
+        except Exception as error:
+            raise KaleidoscopeError(
+                "conversion_failed",
+                f"Could not inspect clip {label!r} for automatic RGB24 conversion.",
+            ) from error
+
+        color_family = metadata.color_family or _infer_color_family(source_format)
+        default_matrix = {
+            "gray": None,
+            "rgb": _MATRIX_RGB,
+            "yuv": _MATRIX_BT709,
+        }[color_family]
+        default_range = _RANGE_LIMITED if color_family == "yuv" else _RANGE_FULL
+        matrix = metadata.matrix if metadata.matrix is not None else default_matrix
+        transfer = (
+            metadata.transfer if metadata.transfer is not None else _TRANSFER_BT709
+        )
+        color_range = metadata.range if metadata.range is not None else default_range
+        assumed: list[str] = []
+        if metadata.matrix is None and default_matrix is not None:
+            assumed.append("matrix RGB" if color_family == "rgb" else "matrix BT.709")
+        if metadata.transfer is None:
+            assumed.append("transfer BT.709")
+        if metadata.range is None:
+            assumed.append("range limited" if color_family == "yuv" else "range full")
+
+        warning_list = [
+            ClipWarning(
+                code="automatic_rgb24_conversion",
+                message=(
+                    f"{source_format} is being converted automatically for preview; "
+                    "convert to RGB24 explicitly upstream for controlled color "
+                    "handling."
+                ),
+            )
+        ]
+        if assumed:
+            warning_list.append(
+                ClipWarning(
+                    code="assumed_color_metadata",
+                    message=(
+                        "Source color metadata is incomplete; preview assumes "
+                        f"{_join_assumptions(assumed)}."
+                    ),
+                )
+            )
+        warnings = tuple(warning_list)
+
+    try:
+        prepared = runtime.prepare_rgb24(
+            node,
+            output_width,
+            output_height,
+            matrix,
+            transfer,
+            color_range,
+        )
+    except Exception as error:
+        raise KaleidoscopeError(
+            "conversion_failed",
+            f"Could not prepare clip {label!r} as RGB24 for preview.",
+        ) from error
+
+    preview_format = getattr(getattr(prepared, "format", None), "name", None)
+    if (
+        preview_format != "RGB24"
+        or getattr(prepared, "width", None) != output_width
+        or getattr(prepared, "height", None) != output_height
+    ):
+        raise KaleidoscopeError(
+            "conversion_failed",
+            f"Could not prepare clip {label!r} as RGB24 for preview.",
+        )
+    return prepared, warnings
+
+
 def _validate_clip(
     clip_id: ClipId,
     label: str,
@@ -225,16 +424,28 @@ def _validate_clip(
         width,
         height,
     )
+    preview_node, warnings = _prepare_preview_node(
+        node,
+        label=label,
+        source_format=format_name,
+        source_width=source_width,
+        source_height=source_height,
+        output_width=output_width,
+        output_height=output_height,
+        runtime=runtime,
+    )
     return (
         NormalizedClip(
             id=clip_id,
             label=label,
-            node=node,
+            node=preview_node,
             source_format=format_name,
+            preview_format="RGB24",
             source_width=source_width,
             source_height=source_height,
             output_width=output_width,
             output_height=output_height,
+            warnings=warnings,
         ),
         num_frames,
         fps,

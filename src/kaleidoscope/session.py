@@ -70,6 +70,15 @@ class PreviewSession:
             [],
         )
 
+    @staticmethod
+    def _render_error(clip: NormalizedClip) -> tuple[str, str]:
+        if clip.source_format != "RGB24":
+            return (
+                "conversion_failed",
+                "The preview frame could not be converted to RGB24.",
+            )
+        return "render_failed", "The preview frame could not be rendered."
+
     def request_frame_set(
         self,
         *,
@@ -90,13 +99,8 @@ class PreviewSession:
             clip = self._clips[clip_id]
         except KeyError as error:
             raise ValueError(f"Unknown clip ID {clip_id!r}.") from error
-        if clip.source_format != "RGB24":
-            raise ValueError("The clip must be prepared as RGB24.")
-        if (
-            clip.source_width != clip.output_width
-            or clip.source_height != clip.output_height
-        ):
-            raise ValueError("The RGB24 clip must already use the preview dimensions.")
+        if clip.preview_format != "RGB24":
+            raise ValueError("The preview clip must be prepared as RGB24.")
 
         self._current_request = (generation, request_id)
         render_started = self._clock()
@@ -105,12 +109,13 @@ class PreviewSession:
             future: Any = node.get_frame_async(frame)
         except Exception:
             _LOGGER.exception("Failed to submit frame %s for clip %r", frame, clip_id)
+            code, user_message = self._render_error(clip)
             self._send_error(
                 request_id=request_id,
                 generation=generation,
                 clip_id=clip_id,
-                code="render_failed",
-                message="The preview frame could not be requested.",
+                code=code,
+                message=user_message,
             )
             return
 
@@ -144,12 +149,13 @@ class PreviewSession:
                 frame_number,
                 clip.id,
             )
+            code, user_message = self._render_error(clip)
             self._send_error(
                 request_id=request_id,
                 generation=generation,
                 clip_id=clip.id,
-                code="render_failed",
-                message="The preview frame could not be rendered.",
+                code=code,
+                message=user_message,
             )
             return
 

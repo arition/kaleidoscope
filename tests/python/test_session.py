@@ -12,6 +12,7 @@ from PIL import Image
 from kaleidoscope.encoding import EncodedImage
 from kaleidoscope.session import PreviewSession
 from kaleidoscope.sources import (
+    ClipWarning,
     NormalizedClip,
     PreviewConfig,
     build_preview_config,
@@ -187,3 +188,70 @@ def test_real_vapoursynth_rgb24_frame_is_encoded_with_expected_color() -> None:
     assert red > 200
     assert 20 < green < 70
     assert blue < 50
+
+
+def test_lazy_fallback_render_failure_reports_conversion_failed() -> None:
+    node = FakeVideoNode()
+    config = make_config(node)
+    converted = NormalizedClip(
+        id="Source",
+        label="Source",
+        node=node,
+        source_format="YUV420P8",
+        source_width=1,
+        source_height=1,
+        output_width=1,
+        output_height=1,
+        warnings=(
+            ClipWarning(
+                code="automatic_rgb24_conversion",
+                message="Automatic RGB24 conversion is active.",
+            ),
+        ),
+    )
+    config = PreviewConfig(
+        clips=(converted,),
+        num_frames=config.num_frames,
+        fps=config.fps,
+        mode=config.mode,
+        primary=config.primary,
+        secondary=config.secondary,
+        active_clip_ids=config.active_clip_ids,
+        overlay_opacity=config.overlay_opacity,
+        max_visible_clips=config.max_visible_clips,
+        quality=config.quality,
+        cache_size=config.cache_size,
+        max_in_flight=config.max_in_flight,
+        autoplay=config.autoplay,
+    )
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=config,
+        send=lambda message, buffers: sent.append((message, buffers)),
+    )
+
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_exception(RuntimeError("unsafe conversion details"))
+
+    assert sent == [
+        (
+            {
+                "protocol": 1,
+                "type": "error",
+                "session_id": "session-1",
+                "request_id": 1,
+                "generation": 0,
+                "clip_id": "Source",
+                "code": "conversion_failed",
+                "message": "The preview frame could not be converted to RGB24.",
+                "recoverable": True,
+            },
+            [],
+        )
+    ]

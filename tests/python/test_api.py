@@ -7,19 +7,28 @@ from typing import Any
 
 import kaleidoscope.api as api
 from kaleidoscope import PreviewWidget, preview
-from kaleidoscope.sources import VapourSynthRuntime
+from kaleidoscope.sources import ColorMetadata, VapourSynthRuntime
 
 
 class FakeFormat:
-    name = "RGB24"
+    def __init__(self, name: str = "RGB24") -> None:
+        self.name = name
 
 
 class FakeVideoNode:
-    width = 1920
-    height = 1080
     num_frames = 240
     fps = Fraction(24000, 1001)
-    format = FakeFormat()
+
+    def __init__(
+        self,
+        *,
+        width: int = 1920,
+        height: int = 1080,
+        format_name: str = "RGB24",
+    ) -> None:
+        self.width = width
+        self.height = height
+        self.format = FakeFormat(format_name)
 
 
 class RenderableVideoNode:
@@ -70,13 +79,30 @@ class FakeVideoOutput:
         self.clip = clip
 
 
-def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
-    runtime = VapourSynthRuntime(
-        video_node_type=FakeVideoNode,
+def make_runtime(video_node_type: type[Any]) -> VapourSynthRuntime:
+    def prepare_rgb24(
+        node: object,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> object:
+        del node, matrix, transfer, color_range
+        return video_node_type(width=width, height=height)
+
+    return VapourSynthRuntime(
+        video_node_type=video_node_type,
         video_output_type=FakeVideoOutput,
         audio_node_type=FakeAudioNode,
         get_outputs=lambda: {},
+        read_color_metadata=lambda node: ColorMetadata(),
+        prepare_rgb24=prepare_rgb24,
     )
+
+
+def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
+    runtime = make_runtime(FakeVideoNode)
     monkeypatch.setattr(api, "load_vapoursynth_runtime", lambda: runtime)
     sent: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -141,6 +167,53 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
     ]
 
 
+def test_preview_serializes_clip_specific_conversion_warnings(
+    monkeypatch: Any,
+) -> None:
+    runtime = make_runtime(FakeVideoNode)
+    monkeypatch.setattr(api, "load_vapoursynth_runtime", lambda: runtime)
+    sent: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+
+    widget = preview(
+        FakeVideoNode(width=640, height=360, format_name="YUV420P8"),
+        height=None,
+    )
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "ready",
+            "session_id": widget.session_id,
+            "capabilities": {"image_bitmap": True, "webp": False},
+        },
+        [],
+    )
+
+    clips = sent[0]["clips"]
+    assert isinstance(clips, list)
+    assert clips[0]["warnings"] == [
+        {
+            "code": "automatic_rgb24_conversion",
+            "message": (
+                "YUV420P8 is being converted automatically for preview; "
+                "convert to RGB24 explicitly upstream for controlled color handling."
+            ),
+        },
+        {
+            "code": "assumed_color_metadata",
+            "message": (
+                "Source color metadata is incomplete; preview assumes matrix BT.709, "
+                "transfer BT.709, and range limited."
+            ),
+        },
+    ]
+
+
 def test_preview_routes_frame_request_to_binary_widget_message(
     monkeypatch: Any,
 ) -> None:
@@ -150,6 +223,10 @@ def test_preview_routes_frame_request_to_binary_widget_message(
         video_output_type=FakeVideoOutput,
         audio_node_type=FakeAudioNode,
         get_outputs=lambda: {},
+        read_color_metadata=lambda source: ColorMetadata(),
+        prepare_rgb24=(
+            lambda source, width, height, matrix, transfer, color_range: source
+        ),
     )
     monkeypatch.setattr(api, "load_vapoursynth_runtime", lambda: runtime)
     sent: list[tuple[dict[str, object], list[bytes] | None]] = []

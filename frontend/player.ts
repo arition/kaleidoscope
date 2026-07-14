@@ -50,6 +50,20 @@ function createClipRow(
   details.append(identity, dimensions);
   row.append(details);
 
+  if (isActive && clip.warnings.length > 0) {
+    const warnings = document.createElement("ul");
+    warnings.className = "kaleidoscope-clip__warnings";
+    warnings.setAttribute("aria-label", `${clip.label} warnings`);
+    warnings.setAttribute("aria-live", "polite");
+    for (const warning of clip.warnings) {
+      const item = document.createElement("li");
+      item.dataset.warningCode = warning.code;
+      item.textContent = warning.message;
+      warnings.append(item);
+    }
+    row.append(warnings);
+  }
+
   if (isActive) {
     const canvas = document.createElement("canvas");
     canvas.className = "kaleidoscope-canvas";

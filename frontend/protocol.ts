@@ -41,6 +41,15 @@ export type ComparisonMode =
   | "overlay"
   | "difference";
 
+export type ClipWarningCode =
+  | "automatic_rgb24_conversion"
+  | "assumed_color_metadata";
+
+export interface ClipWarning {
+  code: ClipWarningCode;
+  message: string;
+}
+
 export interface ClipMetadata {
   id: ClipId;
   label: string;
@@ -49,7 +58,7 @@ export interface ClipMetadata {
   source_height: number;
   output_width: number;
   output_height: number;
-  warnings: unknown[];
+  warnings: ClipWarning[];
 }
 
 export interface PreviewMetadataMessage extends MetadataMessage {
@@ -142,6 +151,16 @@ function isComparisonMode(value: unknown): value is ComparisonMode {
   );
 }
 
+function isClipWarning(value: unknown): value is ClipWarning {
+  return (
+    isRecord(value) &&
+    (value.code === "automatic_rgb24_conversion" ||
+      value.code === "assumed_color_metadata") &&
+    typeof value.message === "string" &&
+    value.message.length > 0
+  );
+}
+
 function isClipMetadata(value: unknown): value is ClipMetadata {
   return (
     isRecord(value) &&
@@ -154,7 +173,8 @@ function isClipMetadata(value: unknown): value is ClipMetadata {
     isPositiveInteger(value.source_height) &&
     isPositiveInteger(value.output_width) &&
     isPositiveInteger(value.output_height) &&
-    Array.isArray(value.warnings)
+    Array.isArray(value.warnings) &&
+    value.warnings.every(isClipWarning)
   );
 }
 

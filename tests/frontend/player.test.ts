@@ -80,12 +80,17 @@ describe("metadata presentation", () => {
         {
           id: "A",
           label: "A",
-          source_format: "RGB24",
+          source_format: "YUV420P8",
           source_width: 640,
           source_height: 360,
           output_width: 640,
           output_height: 360,
-          warnings: [],
+          warnings: [
+            {
+              code: "automatic_rgb24_conversion",
+              message: "Inactive conversion warning.",
+            },
+          ],
         },
         {
           id: "B",
@@ -106,6 +111,61 @@ describe("metadata presentation", () => {
     expect(element.querySelector("[data-clip-id='B']")?.getAttribute("data-active")).toBe(
       "true",
     );
+    expect(element.textContent).not.toContain("Inactive conversion warning.");
+  });
+
+  it("renders an active conversion warning as safe accessible text", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 1,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Filtered"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Filtered",
+          label: "Filtered",
+          source_format: "YUV420P8",
+          source_width: 640,
+          source_height: 360,
+          output_width: 640,
+          output_height: 360,
+          warnings: [
+            {
+              code: "automatic_rgb24_conversion",
+              message:
+                "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
+            },
+            {
+              code: "assumed_color_metadata",
+              message:
+                "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
+            },
+            {
+              code: "automatic_rgb24_conversion",
+              message: "<img src=x onerror=alert(1)>",
+            },
+          ],
+        },
+      ],
+    });
+
+    const warnings = element.querySelector("[aria-label='Filtered warnings']");
+    expect(warnings?.getAttribute("aria-live")).toBe("polite");
+    expect(warnings?.textContent).toContain("YUV420P8 is being converted");
+    expect(warnings?.textContent).toContain("matrix BT.709");
+    expect(warnings?.textContent).toContain("<img src=x onerror=alert(1)>");
+    expect(warnings?.querySelector("img")).toBeNull();
   });
 
   it("requests and paints frame zero from a validated binary payload", async () => {

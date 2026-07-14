@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: T3 complete; T4 is next
+Status: T4 complete; T5 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.3
 
@@ -41,11 +41,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Adapt strided planar RGB and encode a bounded MIME-typed payload.
   - [x] Decode/paint in the browser and verify known canvas pixels.
 
-- [ ] **T4 - Warned automatic RGB24 fallback** (depends on T3)
-  - [ ] Keep direct and resize-only RGB24 paths warning-free.
-  - [ ] Build one fallback conversion/resize node for non-RGB24 clips.
-  - [ ] Emit automatic-conversion and assumed-color-metadata warnings.
-  - [ ] Render visible accessible clip-specific warnings and test YUV preview.
+- [x] **T4 - Warned automatic RGB24 fallback** (depends on T3)
+  - [x] Keep direct and resize-only RGB24 paths warning-free.
+  - [x] Build one fallback conversion/resize node for non-RGB24 clips.
+  - [x] Emit automatic-conversion and assumed-color-metadata warnings.
+  - [x] Render visible accessible clip-specific warnings and test YUV preview.
 
 - [ ] **T5 - Atomic two-clip side-by-side preview** (depends on T4)
   - [ ] Request both clips under one frame-set identity.

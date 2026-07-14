@@ -87,6 +87,17 @@
   font-variant-numeric: tabular-nums;
   font-size: 0.75rem;
 }
+.kaleidoscope-clip__warnings {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem 0.5rem 1.75rem;
+  margin: 0;
+  color: var(--jp-warn-color0, #7a4d00);
+  background: var(--jp-warn-color3, #fff4d6);
+  border-left: 2px solid var(--jp-warn-color1, #c47f00);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
 .kaleidoscope-canvas {
   display: block;
   width: 100%;

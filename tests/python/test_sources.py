@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from kaleidoscope.sources import (
+    ColorMetadata,
     KaleidoscopeError,
     VapourSynthRuntime,
     build_preview_config,
@@ -47,20 +48,46 @@ class FakeVideoOutput:
         self.alt_output = 0
 
 
-def make_runtime(outputs: dict[int, object] | None = None) -> VapourSynthRuntime:
+def make_runtime(
+    outputs: dict[int, object] | None = None,
+    *,
+    color_metadata: ColorMetadata | None = None,
+    prepare_rgb24: Any | None = None,
+) -> VapourSynthRuntime:
     registry = {} if outputs is None else outputs
+
+    def default_prepare_rgb24(
+        node: object,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> FakeVideoNode:
+        del matrix, transfer, color_range
+        assert isinstance(node, FakeVideoNode)
+        return FakeVideoNode(
+            width=width,
+            height=height,
+            num_frames=node.num_frames,
+            fps=node.fps,
+            format_name="RGB24",
+        )
+
     return VapourSynthRuntime(
         video_node_type=FakeVideoNode,
         video_output_type=FakeVideoOutput,
         audio_node_type=FakeAudioNode,
         get_outputs=lambda: registry,
+        read_color_metadata=lambda node: color_metadata or ColorMetadata(),
+        prepare_rgb24=prepare_rgb24 or default_prepare_rgb24,
     )
 
 
 def test_single_clip_normalizes_to_an_immutable_ordered_config() -> None:
     clip = FakeVideoNode()
 
-    config = build_preview_config(clip, runtime=make_runtime())
+    config = build_preview_config(clip, height=None, runtime=make_runtime())
 
     assert config.mode == "single"
     assert config.active_clip_ids == (0,)
@@ -103,7 +130,7 @@ def test_registry_is_snapshotted_sorted_and_ignores_audio() -> None:
         5: FakeVideoOutput(first),
     }
 
-    config = build_preview_config(None, runtime=make_runtime(outputs))
+    config = build_preview_config(None, height=None, runtime=make_runtime(outputs))
     outputs[1] = FakeVideoOutput(FakeVideoNode())
 
     assert [(item.id, item.label) for item in config.clips] == [
@@ -159,6 +186,87 @@ def test_real_vapoursynth_direct_node_and_sparse_registry() -> None:
         )
     finally:
         vapoursynth.clear_outputs()
+
+
+def test_real_vapoursynth_yuv_fallback_prepares_warned_rgb24_node() -> None:
+    vapoursynth = pytest.importorskip("vapoursynth")
+    source = vapoursynth.core.std.BlankClip(
+        width=64,
+        height=48,
+        length=1,
+        format=vapoursynth.YUV420P8,
+        color=[81, 90, 240],
+    )
+
+    config = build_preview_config(
+        source,
+        width=32,
+        height=24,
+        runtime=load_vapoursynth_runtime(),
+    )
+
+    clip = config.clips[0]
+    assert clip.node is not source
+    assert clip.source_format == "YUV420P8"
+    assert clip.preview_format == "RGB24"
+    assert (clip.node.width, clip.node.height, clip.node.format.name) == (
+        32,
+        24,
+        "RGB24",
+    )
+    assert [warning.code for warning in clip.warnings] == [
+        "automatic_rgb24_conversion",
+        "assumed_color_metadata",
+    ]
+
+    frame = clip.node.get_frame(0)
+    try:
+        assert (frame.width, frame.height, frame.format.name) == (32, 24, "RGB24")
+    finally:
+        frame.close()
+
+
+@pytest.mark.parametrize(
+    ("source_format", "expected_assumptions"),
+    [
+        ("RGB48", ("matrix RGB", "transfer BT.709", "range full")),
+        ("GRAYS", ("transfer BT.709", "range full")),
+    ],
+)
+def test_real_vapoursynth_non_yuv_fallback_uses_compatible_color_defaults(
+    source_format: str,
+    expected_assumptions: tuple[str, ...],
+) -> None:
+    vapoursynth = pytest.importorskip("vapoursynth")
+    source = vapoursynth.core.std.BlankClip(
+        width=64,
+        height=48,
+        length=1,
+        format=getattr(vapoursynth, source_format),
+    )
+
+    config = build_preview_config(
+        source,
+        width=32,
+        height=24,
+        runtime=load_vapoursynth_runtime(),
+    )
+
+    clip = config.clips[0]
+    assert clip.node.format.name == "RGB24"
+    assert (clip.node.width, clip.node.height) == (32, 24)
+    assert [warning.code for warning in clip.warnings] == [
+        "automatic_rgb24_conversion",
+        "assumed_color_metadata",
+    ]
+    for assumption in expected_assumptions:
+        assert assumption in clip.warnings[1].message
+
+    frame = clip.node.get_frame(0)
+    try:
+        assert frame.format.name == "RGB24"
+    finally:
+        frame.close()
 
 
 @pytest.mark.parametrize(
@@ -301,3 +409,144 @@ def test_preview_size_never_upscales() -> None:
         640,
         360,
     )
+
+
+def test_rgb24_at_preview_dimensions_is_reused_without_warnings() -> None:
+    clip = FakeVideoNode(width=640, height=360)
+    prepare_calls: list[object] = []
+
+    config = build_preview_config(
+        clip,
+        height=360,
+        runtime=make_runtime(
+            prepare_rgb24=lambda *args: prepare_calls.append(args),
+        ),
+    )
+
+    assert config.clips[0].node is clip
+    assert config.clips[0].preview_format == "RGB24"
+    assert config.clips[0].warnings == ()
+    assert prepare_calls == []
+
+
+def test_rgb24_resize_builds_one_warning_free_preview_node() -> None:
+    clip = FakeVideoNode(width=1920, height=1080)
+    prepared = FakeVideoNode(width=960, height=540)
+    prepare_calls: list[
+        tuple[object, int, int, int | None, int | None, int | None]
+    ] = []
+
+    def prepare_rgb24(
+        node: object,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> FakeVideoNode:
+        prepare_calls.append((node, width, height, matrix, transfer, color_range))
+        return prepared
+
+    config = build_preview_config(
+        clip,
+        width=960,
+        height=540,
+        runtime=make_runtime(prepare_rgb24=prepare_rgb24),
+    )
+
+    assert config.clips[0].node is prepared
+    assert config.clips[0].preview_format == "RGB24"
+    assert config.clips[0].warnings == ()
+    assert prepare_calls == [(clip, 960, 540, None, None, None)]
+
+
+def test_yuv_fallback_builds_one_rgb24_node_with_assumption_warnings() -> None:
+    clip = FakeVideoNode(width=1920, height=1080, format_name="YUV420P8")
+    prepared = FakeVideoNode(width=960, height=540)
+    prepare_calls: list[
+        tuple[object, int, int, int | None, int | None, int | None]
+    ] = []
+
+    def prepare_rgb24(
+        node: object,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> FakeVideoNode:
+        prepare_calls.append((node, width, height, matrix, transfer, color_range))
+        return prepared
+
+    config = build_preview_config(
+        clip,
+        width=960,
+        height=540,
+        runtime=make_runtime(prepare_rgb24=prepare_rgb24),
+    )
+
+    normalized = config.clips[0]
+    assert normalized.node is prepared
+    assert normalized.source_format == "YUV420P8"
+    assert normalized.preview_format == "RGB24"
+    assert [warning.code for warning in normalized.warnings] == [
+        "automatic_rgb24_conversion",
+        "assumed_color_metadata",
+    ]
+    assert "YUV420P8" in normalized.warnings[0].message
+    assert "explicitly upstream" in normalized.warnings[0].message
+    assert "matrix BT.709" in normalized.warnings[1].message
+    assert "transfer BT.709" in normalized.warnings[1].message
+    assert "range limited" in normalized.warnings[1].message
+    assert prepare_calls == [(clip, 960, 540, 1, 1, 0)]
+
+
+def test_yuv_fallback_uses_complete_source_color_metadata_without_assumption() -> None:
+    clip = FakeVideoNode(format_name="YUV420P8")
+    prepare_calls: list[
+        tuple[object, int, int, int | None, int | None, int | None]
+    ] = []
+
+    def prepare_rgb24(
+        node: object,
+        width: int,
+        height: int,
+        matrix: int | None,
+        transfer: int | None,
+        color_range: int | None,
+    ) -> FakeVideoNode:
+        prepare_calls.append((node, width, height, matrix, transfer, color_range))
+        assert isinstance(node, FakeVideoNode)
+        return FakeVideoNode(width=width, height=height)
+
+    config = build_preview_config(
+        clip,
+        height=None,
+        runtime=make_runtime(
+            color_metadata=ColorMetadata(matrix=5, transfer=6, range=1),
+            prepare_rgb24=prepare_rgb24,
+        ),
+    )
+
+    assert [warning.code for warning in config.clips[0].warnings] == [
+        "automatic_rgb24_conversion"
+    ]
+    assert prepare_calls == [(clip, 1920, 1080, 5, 6, 1)]
+
+
+def test_rgb24_conversion_graph_failure_has_stable_error_code() -> None:
+    clip = FakeVideoNode(format_name="YUV420P8")
+
+    def fail_conversion(*args: object) -> object:
+        del args
+        raise RuntimeError("unsafe <script>alert(1)</script>")
+
+    with pytest.raises(KaleidoscopeError) as error:
+        build_preview_config(
+            clip,
+            height=None,
+            runtime=make_runtime(prepare_rgb24=fail_conversion),
+        )
+
+    assert error.value.code == "conversion_failed"
+    assert "script" not in str(error.value)

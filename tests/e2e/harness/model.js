@@ -3,6 +3,10 @@ import { render } from "/src/kaleidoscope/static/index.js";
 const sessionId = "browser-session";
 const messages = [];
 let messageHandler;
+const showConversionWarning = new URLSearchParams(window.location.search).has(
+  "conversion",
+);
+const clipId = showConversionWarning ? "Filtered" : "Source";
 
 const emit = (message, buffers = []) => {
   messageHandler?.(message, buffers);
@@ -35,18 +39,31 @@ const model = {
           fps_num: 24,
           fps_den: 1,
           mode: "single",
-          active_clip_ids: ["Source"],
+          active_clip_ids: [clipId],
           max_visible_clips: 4,
           clips: [
             {
-              id: "Source",
-              label: "Source",
-              source_format: "RGB24",
+              id: clipId,
+              label: clipId,
+              source_format: showConversionWarning ? "YUV420P8" : "RGB24",
               source_width: 64,
               source_height: 48,
               output_width: 64,
               output_height: 48,
-              warnings: [],
+              warnings: showConversionWarning
+                ? [
+                    {
+                      code: "automatic_rgb24_conversion",
+                      message:
+                        "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
+                    },
+                    {
+                      code: "assumed_color_metadata",
+                      message:
+                        "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
+                    },
+                  ]
+                : [],
             },
           ],
         });
@@ -67,7 +84,7 @@ const model = {
               frame: message.frame,
               frames: [
                 {
-                  clip_id: "Source",
+                  clip_id: clipId,
                   buffer_index: 0,
                   mime: "image/jpeg",
                   byte_length: buffer.byteLength,

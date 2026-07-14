@@ -28,8 +28,11 @@ function isClipId(value) {
 function isComparisonMode(value) {
   return value === "single" || value === "side-by-side" || value === "wipe" || value === "overlay" || value === "difference";
 }
+function isClipWarning(value) {
+  return isRecord(value) && (value.code === "automatic_rgb24_conversion" || value.code === "assumed_color_metadata") && typeof value.message === "string" && value.message.length > 0;
+}
 function isClipMetadata(value) {
-  return isRecord(value) && isClipId(value.id) && typeof value.label === "string" && value.label.length > 0 && typeof value.source_format === "string" && value.source_format.length > 0 && isPositiveInteger(value.source_width) && isPositiveInteger(value.source_height) && isPositiveInteger(value.output_width) && isPositiveInteger(value.output_height) && Array.isArray(value.warnings);
+  return isRecord(value) && isClipId(value.id) && typeof value.label === "string" && value.label.length > 0 && typeof value.source_format === "string" && value.source_format.length > 0 && isPositiveInteger(value.source_width) && isPositiveInteger(value.source_height) && isPositiveInteger(value.output_width) && isPositiveInteger(value.output_height) && Array.isArray(value.warnings) && value.warnings.every(isClipWarning);
 }
 function isFrameManifest(value) {
   return isRecord(value) && isClipId(value.clip_id) && isNonnegativeInteger(value.buffer_index) && (value.mime === "image/jpeg" || value.mime === "image/webp") && isPositiveInteger(value.byte_length) && value.byte_length <= MAX_FRAME_BUFFER_BYTES && isNonnegativeFiniteNumber(value.render_ms) && isNonnegativeFiniteNumber(value.encode_ms);
@@ -163,6 +166,19 @@ function createClipRow(clip, activeClipIds, canvases) {
   details.className = "kaleidoscope-clip__details";
   details.append(identity, dimensions);
   row.append(details);
+  if (isActive && clip.warnings.length > 0) {
+    const warnings = document.createElement("ul");
+    warnings.className = "kaleidoscope-clip__warnings";
+    warnings.setAttribute("aria-label", `${clip.label} warnings`);
+    warnings.setAttribute("aria-live", "polite");
+    for (const warning of clip.warnings) {
+      const item = document.createElement("li");
+      item.dataset.warningCode = warning.code;
+      item.textContent = warning.message;
+      warnings.append(item);
+    }
+    row.append(warnings);
+  }
   if (isActive) {
     const canvas = document.createElement("canvas");
     canvas.className = "kaleidoscope-canvas";
