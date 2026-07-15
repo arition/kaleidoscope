@@ -34,7 +34,25 @@ class RequestFrameSetMessage(TypedDict):
     reason: Literal["seek", "playback", "prefetch"]
 
 
-type FrontendMessage = ReadyMessage | RequestFrameSetMessage
+class AckFrameSetMessage(TypedDict):
+    protocol: Literal[1]
+    type: Literal["ack_frame_set"]
+    session_id: str
+    request_id: int
+    generation: int
+    outcome: Literal["painted", "stale", "decode_error"]
+
+
+class SetPlayingMessage(TypedDict):
+    protocol: Literal[1]
+    type: Literal["set_playing"]
+    session_id: str
+    playing: bool
+
+
+type FrontendMessage = (
+    ReadyMessage | RequestFrameSetMessage | AckFrameSetMessage | SetPlayingMessage
+)
 
 
 class MetadataMessage(TypedDict):
@@ -160,6 +178,20 @@ def parse_frontend_message(value: object) -> FrontendMessage:
         ):
             raise ProtocolError("invalid_message", "Malformed frame-set request.")
         return cast(RequestFrameSetMessage, value)
+
+    if value.get("type") == "ack_frame_set":
+        if (
+            not _is_nonnegative_int(value.get("request_id"))
+            or not _is_nonnegative_int(value.get("generation"))
+            or value.get("outcome") not in {"painted", "stale", "decode_error"}
+        ):
+            raise ProtocolError("invalid_message", "Malformed frame-set ACK.")
+        return cast(AckFrameSetMessage, value)
+
+    if value.get("type") == "set_playing":
+        if not isinstance(value.get("playing"), bool):
+            raise ProtocolError("invalid_message", "Malformed playing state.")
+        return cast(SetPlayingMessage, value)
 
     raise ProtocolError("invalid_message", "Unsupported frontend message type.")
 

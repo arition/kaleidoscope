@@ -27,6 +27,8 @@ class PreviewWidget(anywidget.AnyWidget):
 
     session_id = traitlets.Unicode().tag(sync=True)
     status = traitlets.Unicode("initializing", read_only=True).tag(sync=True)
+    current_frame = traitlets.Int(0, read_only=True).tag(sync=True)
+    playing = traitlets.Bool(False, read_only=True).tag(sync=True)
     mode = traitlets.Unicode("single", read_only=True).tag(sync=True)
     active_clip_ids: traitlets.List[Any] = traitlets.List(read_only=True).tag(sync=True)
 
@@ -54,6 +56,7 @@ class PreviewWidget(anywidget.AnyWidget):
         self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
             "awaiting_ready"
         )
+        self._delivered_frames: dict[tuple[int, int], int] = {}
         self.on_msg(self._handle_custom_message)
 
     def _reject_frontend_message(self, error: ProtocolError) -> None:
@@ -73,6 +76,7 @@ class PreviewWidget(anywidget.AnyWidget):
             "mode": self._config.mode,
             "active_clip_ids": list(self._config.active_clip_ids),
             "max_visible_clips": self._config.max_visible_clips,
+            "autoplay": self._config.autoplay,
             "clips": [
                 {
                     "id": clip.id,
@@ -177,6 +181,22 @@ class PreviewWidget(anywidget.AnyWidget):
             return
 
         try:
+            if message["type"] == "set_playing":
+                self.set_trait("playing", message["playing"])
+                return
+            if message["type"] == "ack_frame_set":
+                identity = (message["request_id"], message["generation"])
+                delivered_frame = self._delivered_frames.pop(identity, None)
+                if message["outcome"] == "painted" and delivered_frame is not None:
+                    self.set_trait("current_frame", delivered_frame)
+                frame = self._session.ack_frame_set(
+                    request_id=message["request_id"],
+                    generation=message["generation"],
+                    outcome=message["outcome"],
+                )
+                if message["outcome"] == "painted" and delivered_frame is None:
+                    self.set_trait("current_frame", frame)
+                return
             self._session.request_frame_set(
                 request_id=message["request_id"],
                 generation=message["generation"],
@@ -193,10 +213,21 @@ class PreviewWidget(anywidget.AnyWidget):
         content: dict[str, object],
         buffers: list[bytes],
     ) -> None:
+        if content.get("type") == "frame_set":
+            request_id = content.get("request_id")
+            generation = content.get("generation")
+            frame = content.get("frame")
+            if (
+                isinstance(request_id, int)
+                and isinstance(generation, int)
+                and isinstance(frame, int)
+            ):
+                self._delivered_frames[(request_id, generation)] = frame
         self.send(content, buffers=buffers)
 
     def close(self) -> None:
         self._frontend_state = "terminal"
+        self._delivered_frames.clear()
         if self._session is not None:
             self._session.close()
         super().close()

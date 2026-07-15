@@ -20,6 +20,7 @@ const metadata: PreviewMetadataMessage = {
   mode: "side-by-side",
   active_clip_ids: ["Source", "Filtered"],
   max_visible_clips: 4,
+  autoplay: false,
   clips: [
     {
       id: "Source",
@@ -88,6 +89,8 @@ function createView(drawImage: ReturnType<typeof vi.fn>): PlayerView {
       ["Source", source],
       ["Filtered", filtered],
     ]),
+    setFrame: () => {},
+    setPlaying: () => {},
   };
 }
 
@@ -220,6 +223,14 @@ describe("atomic comparison painting", () => {
     expect(element.querySelector("[role='status']")?.textContent).toBe(
       "Frame 0 ready.",
     );
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "ack_frame_set",
+      session_id: "session-1",
+      request_id: 0,
+      generation: 0,
+      outcome: "painted",
+    });
 
     const incomplete = frameSet(0);
     incomplete.frames = incomplete.frames.slice(0, 1);
@@ -277,6 +288,14 @@ describe("atomic comparison painting", () => {
 
     expect(createImageBitmap).not.toHaveBeenCalled();
     expect(drawImage).not.toHaveBeenCalled();
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "ack_frame_set",
+      session_id: "session-1",
+      request_id: 0,
+      generation: 0,
+      outcome: "stale",
+    });
 
     scheduled?.(0);
     const requests = model.sent.filter(
@@ -345,6 +364,47 @@ describe("atomic comparison painting", () => {
     );
     expect(drawImage).toHaveBeenCalledTimes(2);
     expect(currentClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("acks a current decode failure and pauses playback intent", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ close: vi.fn() } as unknown as ImageBitmap)
+        .mockRejectedValueOnce(new Error("decode failed"))
+        .mockResolvedValueOnce({ close: vi.fn() } as unknown as ImageBitmap),
+    );
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    model.emit(metadata);
+    element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
+    model.emit(frameSet(0), payloads());
+
+    await vi.waitFor(() =>
+      expect(model.sent).toContainEqual({
+        protocol: 1,
+        type: "ack_frame_set",
+        session_id: "session-1",
+        request_id: 0,
+        generation: 0,
+        outcome: "decode_error",
+      }),
+    );
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "set_playing",
+      session_id: "session-1",
+      playing: false,
+    });
+    expect(element.querySelector("button[aria-label='Play']")).not.toBeNull();
   });
 
   it("identifies the failed clip without replacing the complete set", async () => {

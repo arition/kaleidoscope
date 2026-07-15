@@ -292,3 +292,133 @@ test("paused navigation controls fit a narrow notebook", async ({ page }) => {
   expect(geometry.frameWidth).toBeGreaterThanOrEqual(72);
   expect(geometry.timeWidth).toBeGreaterThanOrEqual(112);
 });
+
+test("playback pauses at the final frame and restarts from zero", async ({
+  page,
+}) => {
+  await page.goto("/tests/e2e/harness/?playback=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect(page.getByRole("status").last()).toHaveText("Frame 3 ready.");
+  await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const messages = (
+          window as typeof window & { __kaleidoscopeMessages: unknown[] }
+        ).__kaleidoscopeMessages;
+        return messages.filter(
+          (message) =>
+            typeof message === "object" &&
+            message !== null &&
+            "type" in message &&
+            message.type === "request_frame_set" &&
+            "reason" in message &&
+            message.reason === "playback",
+        );
+      });
+    })
+    .toContainEqual(
+      expect.objectContaining({ frame: 0, generation: 1, reason: "playback" }),
+    );
+});
+
+test("slow playback completion cannot replace the latest frame", async ({
+  page,
+}) => {
+  await page.goto("/tests/e2e/harness/?slow-playback=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect(page.getByRole("status").last()).toHaveText("Frame 5 ready.");
+  await page.waitForTimeout(800);
+  await expect(page.getByRole("status").last()).toHaveText("Frame 5 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 5" })).toBeVisible();
+
+  const staleAckFrames = await page.evaluate(() => {
+    return (
+      window as typeof window & { __kaleidoscopeMessages: unknown[] }
+    ).__kaleidoscopeMessages
+      .filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "ack_frame_set" &&
+          "outcome" in message &&
+          message.outcome === "stale",
+      )
+      .map((message) => (message as { request_id: number }).request_id);
+  });
+  expect(staleAckFrames.length).toBeGreaterThan(0);
+});
+
+test("visibility resumes only playback that was active before hiding", async ({
+  page,
+}) => {
+  await page.goto("/tests/e2e/harness/?playback=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  await page.getByRole("button", { name: "Play" }).click();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect
+    .poll(async () => {
+      return page.evaluate(() =>
+        (
+          window as typeof window & { __kaleidoscopeMessages: unknown[] }
+        ).__kaleidoscopeMessages
+          .filter(
+            (message) =>
+              typeof message === "object" &&
+              message !== null &&
+              "type" in message &&
+              message.type === "set_playing",
+          )
+          .map((message) => (message as { playing: boolean }).playing),
+      );
+    })
+    .toEqual([true, false, true]);
+
+  await page.getByRole("button", { name: "Pause" }).click();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+
+  const playingStates = await page.evaluate(() =>
+    (
+      window as typeof window & { __kaleidoscopeMessages: unknown[] }
+    ).__kaleidoscopeMessages
+      .filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "set_playing",
+      )
+      .map((message) => (message as { playing: boolean }).playing),
+  );
+  expect(playingStates).toEqual([true, false, true, false]);
+});

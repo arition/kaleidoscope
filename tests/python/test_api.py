@@ -140,6 +140,7 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
             "mode": "side-by-side",
             "active_clip_ids": ["Source", "Filtered"],
             "max_visible_clips": 4,
+            "autoplay": False,
             "clips": [
                 {
                     "id": "Source",

@@ -1,6 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { PausedSeekScheduler } from "../../frontend/scheduler.js";
+import {
+  PausedSeekScheduler,
+  PlaybackClock,
+} from "../../frontend/scheduler.js";
+
+describe("PlaybackClock", () => {
+  it("derives the desired frame from one rational clock anchor", () => {
+    const clock = new PlaybackClock({
+      numFrames: 100,
+      fpsNum: 24000,
+      fpsDen: 1001,
+    });
+
+    expect(clock.play(0, 100)).toBe(0);
+    expect(clock.sample(142)).toEqual({ frame: 1, ended: false });
+    expect(clock.sample(1101)).toEqual({ frame: 24, ended: false });
+  });
+
+  it("freezes on pause and restarts from zero after the end", () => {
+    const clock = new PlaybackClock({
+      numFrames: 10,
+      fpsNum: 24,
+      fpsDen: 1,
+    });
+
+    clock.play(4, 0);
+    expect(clock.pause(125)).toBe(7);
+    expect(clock.sample(1000)).toEqual({ frame: 7, ended: false });
+
+    clock.play(8, 2000);
+    expect(clock.sample(2100)).toEqual({ frame: 9, ended: true });
+    expect(clock.play(9, 3000)).toBe(0);
+    expect(clock.playing).toBe(true);
+  });
+});
 
 describe("PausedSeekScheduler", () => {
   it("clamps exact seeks and assigns monotonic request identities", () => {
@@ -98,6 +132,32 @@ describe("PausedSeekScheduler", () => {
         generation: 0,
         frame: 31,
       }),
+    ]);
+  });
+
+  it("shares one generation across playback and advances on discontinuities", () => {
+    const sent: unknown[] = [];
+    const scheduler = new PausedSeekScheduler({
+      sessionId: "session-1",
+      numFrames: 100,
+      clipIds: ["Source"],
+      send: (message) => sent.push(message),
+    });
+
+    scheduler.requestExact(0);
+    scheduler.requestPlayback(1);
+    scheduler.requestPlayback(8);
+    scheduler.requestExact(4);
+    scheduler.requestPlayback(5);
+    scheduler.requestPlayback(0, true);
+
+    expect(sent).toMatchObject([
+      { request_id: 0, generation: 0, frame: 0, reason: "seek" },
+      { request_id: 1, generation: 0, frame: 1, reason: "playback" },
+      { request_id: 2, generation: 0, frame: 8, reason: "playback" },
+      { request_id: 3, generation: 1, frame: 4, reason: "seek" },
+      { request_id: 4, generation: 1, frame: 5, reason: "playback" },
+      { request_id: 5, generation: 2, frame: 0, reason: "playback" },
     ]);
   });
 

@@ -1,6 +1,8 @@
 import type { RenderProps } from "@anywidget/types";
 
 import {
+  createFrameSetAck,
+  createSetPlayingMessage,
   createReadyMessage,
   parseBackendMessage,
   ProtocolError,
@@ -9,7 +11,10 @@ import {
 import type { FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
 import { paintFrameSet, renderMetadata } from "./player.js";
 import type { PlayerView } from "./player.js";
-import { PausedSeekScheduler } from "./scheduler.js";
+import {
+  PausedSeekScheduler,
+  PlaybackController,
+} from "./scheduler.js";
 import "./styles.css";
 
 function createStatus(text: string): HTMLElement {
@@ -57,15 +62,39 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   let metadata: PreviewMetadataMessage | undefined;
   let playerView: PlayerView | undefined;
   let seekScheduler: PausedSeekScheduler | undefined;
+  let playbackController: PlaybackController | undefined;
   let currentRequest:
     | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
     | undefined;
+  let resumeAfterPaint:
+    | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
+    | undefined;
+  let resumeAfterScrub = false;
+  let autoplayPending = false;
+  let resumeAfterVisibility = false;
 
   const updateStatus = (text: string): void => {
     const liveStatus = el.querySelector<HTMLElement>("[role='status']");
     if (liveStatus !== null) {
       liveStatus.textContent = text;
     }
+  };
+
+  const playWhenVisible = (): void => {
+    if (document.visibilityState === "hidden") {
+      resumeAfterVisibility = true;
+      return;
+    }
+    resumeAfterVisibility = false;
+    playbackController?.play();
+  };
+
+  const togglePlaying = (): void => {
+    autoplayPending = false;
+    resumeAfterPaint = undefined;
+    resumeAfterScrub = false;
+    resumeAfterVisibility = false;
+    playbackController?.toggle();
   };
 
   const handleMessage = async (
@@ -93,15 +122,48 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             el,
             message,
             {
-              requestExact: (frame) =>
-                seekScheduler?.requestExact(frame).frame ?? 0,
+              requestExact: (frame) => {
+                playbackController?.pause(false);
+                const request = seekScheduler?.requestExact(frame);
+                if (request === undefined) {
+                  return 0;
+                }
+                if (resumeAfterScrub) {
+                  resumeAfterPaint = request;
+                  resumeAfterScrub = false;
+                } else {
+                  resumeAfterPaint = undefined;
+                }
+                return request.frame;
+              },
               scheduleScrub: (frame) => {
+                if (
+                  playbackController?.playing ||
+                  resumeAfterPaint !== undefined ||
+                  resumeAfterScrub
+                ) {
+                  resumeAfterScrub = true;
+                }
+                resumeAfterPaint = undefined;
+                playbackController?.pause(false);
                 currentRequest = undefined;
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
               },
+              togglePlaying,
             },
             signal,
           );
+          playbackController = new PlaybackController({
+            numFrames: message.num_frames,
+            fpsNum: message.fps_num,
+            fpsDen: message.fps_den,
+            scheduler: seekScheduler,
+            onFrame: (frame) => playerView?.setFrame(frame),
+            onPlaying: (playing) => playerView?.setPlaying(playing),
+            sendPlaying: (playing) =>
+              model.send(createSetPlayingMessage(sessionId, playing)),
+          });
+          autoplayPending = message.autoplay;
           seekScheduler.requestExact(0);
           return;
         }
@@ -129,7 +191,20 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           manifestClipIds.every(
             (clipId, index) => clipId === expectedClipIds[index],
           );
+        const acknowledge = (
+          outcome: "painted" | "stale" | "decode_error",
+        ): void => {
+          model.send(
+            createFrameSetAck(
+              sessionId,
+              message.request_id,
+              message.generation,
+              outcome,
+            ),
+          );
+        };
         if (!isCurrent()) {
+          acknowledge("stale");
           return;
         }
         let painted: boolean;
@@ -143,12 +218,35 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           );
         } catch (error) {
           if (!isCurrent()) {
+            acknowledge("stale");
             return;
           }
+          acknowledge("decode_error");
+          playbackController?.pause(false);
           throw error;
         }
         if (painted) {
+          playbackController?.setCurrentFrame(message.frame);
           updateStatus(`Frame ${message.frame} ready.`);
+          acknowledge("painted");
+          const shouldResume =
+            resumeAfterPaint !== undefined &&
+            message.request_id === resumeAfterPaint.request_id &&
+            message.generation === resumeAfterPaint.generation &&
+            message.frame === resumeAfterPaint.frame;
+          if (shouldResume) {
+            resumeAfterPaint = undefined;
+            if (message.frame < metadata.num_frames - 1) {
+              playWhenVisible();
+            }
+          } else if (autoplayPending) {
+            autoplayPending = false;
+            if (message.frame < metadata.num_frames - 1) {
+              playWhenVisible();
+            }
+          }
+        } else {
+          acknowledge("stale");
         }
         return;
       }
@@ -179,9 +277,25 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   };
 
   model.on("msg:custom", onMessage);
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === "hidden") {
+      if (playbackController?.playing) {
+        const pausedFrame = playbackController.pause(false);
+        resumeAfterVisibility =
+          metadata !== undefined && pausedFrame < metadata.num_frames - 1;
+        currentRequest = undefined;
+      }
+    } else if (resumeAfterVisibility) {
+      playWhenVisible();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange, {
+    signal,
+  });
   signal.addEventListener(
     "abort",
     () => {
+      playbackController?.close();
       seekScheduler?.close();
       model.off("msg:custom", onMessage);
     },

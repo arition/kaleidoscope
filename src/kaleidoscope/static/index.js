@@ -58,11 +58,12 @@ function hasPreviewMetadataFields(value) {
     "mode",
     "active_clip_ids",
     "max_visible_clips",
+    "autoplay",
     "clips"
   ].some((key) => key in value);
 }
 function isPreviewMetadataMessage(value) {
-  if (!isPositiveInteger(value.num_frames) || !isPositiveInteger(value.fps_num) || !isPositiveInteger(value.fps_den) || !isComparisonMode(value.mode) || !isPositiveInteger(value.max_visible_clips) || value.max_visible_clips > 4 || !Array.isArray(value.active_clip_ids) || value.active_clip_ids.length === 0 || !value.active_clip_ids.every(isClipId) || !Array.isArray(value.clips) || value.clips.length === 0 || !value.clips.every(isClipMetadata)) {
+  if (!isPositiveInteger(value.num_frames) || !isPositiveInteger(value.fps_num) || !isPositiveInteger(value.fps_den) || !isComparisonMode(value.mode) || !isPositiveInteger(value.max_visible_clips) || value.max_visible_clips > 4 || typeof value.autoplay !== "boolean" || !Array.isArray(value.active_clip_ids) || value.active_clip_ids.length === 0 || !value.active_clip_ids.every(isClipId) || !Array.isArray(value.clips) || value.clips.length === 0 || !value.clips.every(isClipMetadata)) {
     return false;
   }
   const clipIds = value.clips.map((clip) => clip.id);
@@ -87,6 +88,24 @@ function createFrameSetRequest(sessionId, requestId, generation, frame, clipIds,
     frame,
     clip_ids: [...clipIds],
     reason
+  };
+}
+function createFrameSetAck(sessionId, requestId, generation, outcome) {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "ack_frame_set",
+    session_id: sessionId,
+    request_id: requestId,
+    generation,
+    outcome
+  };
+}
+function createSetPlayingMessage(sessionId, playing) {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "set_playing",
+    session_id: sessionId,
+    playing
   };
 }
 function validateFrameSetBuffers(message, buffers) {
@@ -318,6 +337,20 @@ function renderMetadata(root, message, navigation, signal) {
     button.addEventListener("click", () => requestExact(target()), { signal });
     return button;
   };
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "kaleidoscope-control-button";
+  play.disabled = navigation === void 0;
+  let playing = false;
+  const updatePlaying = (active) => {
+    playing = active;
+    play.setAttribute("aria-label", active ? "Pause" : "Play");
+    play.title = active ? "Pause" : "Play";
+    play.textContent = active ? "||" : ">";
+    play.setAttribute("aria-pressed", String(active));
+  };
+  updatePlaying(false);
+  play.addEventListener("click", () => navigation?.togglePlaying(), { signal });
   const seek = document.createElement("input");
   seek.type = "range";
   seek.className = "kaleidoscope-seek";
@@ -423,6 +456,7 @@ function renderMetadata(root, message, navigation, signal) {
     { signal }
   );
   controls.append(
+    play,
     first,
     previous,
     seek,
@@ -444,7 +478,10 @@ function renderMetadata(root, message, navigation, signal) {
       if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.key === "ArrowLeft") {
+      if (event.key === " ") {
+        event.preventDefault();
+        navigation?.togglePlaying();
+      } else if (event.key === "ArrowLeft") {
         event.preventDefault();
         requestExact(
           event.shiftKey ? offsetFrameBySeconds(
@@ -491,7 +528,12 @@ function renderMetadata(root, message, navigation, signal) {
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
   root.replaceChildren(header, timeline, controls, clips, status);
-  return { metadata: message, canvases };
+  return {
+    metadata: message,
+    canvases,
+    setFrame: updateFrame,
+    setPlaying: updatePlaying
+  };
 }
 async function decodeFrames(message, buffers) {
   const results = await Promise.allSettled(
@@ -598,6 +640,152 @@ async function paintFrameSet(view, message, buffers, shouldCommit) {
 }
 
 // frontend/scheduler.ts
+var timestampMicros = (milliseconds) => BigInt(Math.trunc(milliseconds * 1e3));
+var PlaybackClock = class {
+  numFrames;
+  fpsNum;
+  fpsDen;
+  anchorFrame = 0;
+  anchorMicros = 0n;
+  currentFrame = 0;
+  active = false;
+  constructor(options) {
+    this.numFrames = options.numFrames;
+    this.fpsNum = BigInt(options.fpsNum);
+    this.fpsDen = BigInt(options.fpsDen);
+  }
+  get playing() {
+    return this.active;
+  }
+  clamp(frame) {
+    return Math.min(this.numFrames - 1, Math.max(0, Math.trunc(frame)));
+  }
+  play(frame, now) {
+    const clamped = this.clamp(frame);
+    this.currentFrame = clamped === this.numFrames - 1 ? 0 : clamped;
+    this.anchorFrame = this.currentFrame;
+    this.anchorMicros = timestampMicros(now);
+    this.active = true;
+    return this.currentFrame;
+  }
+  pause(now) {
+    if (this.active) {
+      this.sample(now);
+      this.active = false;
+    }
+    return this.currentFrame;
+  }
+  sample(now) {
+    if (!this.active) {
+      return { frame: this.currentFrame, ended: false };
+    }
+    const elapsed = timestampMicros(now) - this.anchorMicros;
+    const elapsedFrames = elapsed <= 0n ? 0n : elapsed * this.fpsNum / (1000000n * this.fpsDen);
+    const desired = Math.max(
+      this.currentFrame,
+      this.anchorFrame + Number(elapsedFrames)
+    );
+    if (desired >= this.numFrames - 1) {
+      this.currentFrame = this.numFrames - 1;
+      this.active = false;
+      return { frame: this.currentFrame, ended: true };
+    }
+    this.currentFrame = desired;
+    return { frame: this.currentFrame, ended: false };
+  }
+};
+var PlaybackController = class {
+  clock;
+  scheduler;
+  onFrame;
+  onPlaying;
+  sendPlaying;
+  schedule;
+  cancel;
+  now;
+  currentFrame = 0;
+  scheduledHandle;
+  constructor(options) {
+    this.clock = new PlaybackClock(options);
+    this.scheduler = options.scheduler;
+    this.onFrame = options.onFrame;
+    this.onPlaying = options.onPlaying;
+    this.sendPlaying = options.sendPlaying;
+    this.schedule = options.schedule ?? scheduleFrame;
+    this.cancel = options.cancel ?? cancelFrame;
+    this.now = options.now ?? (() => performance.now());
+  }
+  get playing() {
+    return this.clock.playing;
+  }
+  setCurrentFrame(frame) {
+    this.currentFrame = frame;
+  }
+  scheduleTick() {
+    if (this.scheduledHandle === void 0 && this.clock.playing) {
+      this.scheduledHandle = this.schedule((timestamp) => {
+        this.scheduledHandle = void 0;
+        const sample = this.clock.sample(timestamp);
+        if (sample.frame !== this.currentFrame) {
+          this.currentFrame = sample.frame;
+          this.onFrame(sample.frame);
+          this.scheduler.requestPlayback(sample.frame);
+        }
+        if (sample.ended) {
+          this.onPlaying(false);
+          this.sendPlaying(false);
+          return;
+        }
+        this.scheduleTick();
+      });
+    }
+  }
+  play() {
+    if (this.clock.playing) {
+      return;
+    }
+    const previousFrame = this.currentFrame;
+    const frame = this.clock.play(previousFrame, this.now());
+    if (frame !== previousFrame) {
+      this.currentFrame = frame;
+      this.onFrame(frame);
+      this.scheduler.requestPlayback(frame, true);
+    }
+    this.onPlaying(true);
+    this.sendPlaying(true);
+    this.scheduleTick();
+  }
+  pause(requestExact = true) {
+    if (!this.clock.playing) {
+      return this.currentFrame;
+    }
+    this.currentFrame = this.clock.pause(this.now());
+    if (this.scheduledHandle !== void 0) {
+      this.cancel(this.scheduledHandle);
+      this.scheduledHandle = void 0;
+    }
+    if (requestExact) {
+      this.scheduler.requestExact(this.currentFrame);
+    }
+    this.onFrame(this.currentFrame);
+    this.onPlaying(false);
+    this.sendPlaying(false);
+    return this.currentFrame;
+  }
+  toggle() {
+    if (this.clock.playing) {
+      this.pause();
+    } else {
+      this.play();
+    }
+  }
+  close() {
+    if (this.scheduledHandle !== void 0) {
+      this.cancel(this.scheduledHandle);
+      this.scheduledHandle = void 0;
+    }
+  }
+};
 var scheduleFrame = (callback) => {
   if (typeof globalThis.requestAnimationFrame === "function") {
     return globalThis.requestAnimationFrame(callback);
@@ -645,18 +833,16 @@ var PausedSeekScheduler = class {
       this.scheduledHandle = void 0;
     }
   }
-  requestExact(frame) {
-    this.cancelScheduledScrub();
+  sendRequest(frame, generation, reason) {
     const identity = {
       request_id: this.nextRequestId,
-      generation: this.nextGeneration,
+      generation,
       frame: this.clamp(frame)
     };
     if (this.closed) {
       return identity;
     }
     this.nextRequestId += 1;
-    this.nextGeneration += 1;
     this.send(
       createFrameSetRequest(
         this.sessionId,
@@ -664,10 +850,24 @@ var PausedSeekScheduler = class {
         identity.generation,
         identity.frame,
         this.clipIds,
-        "seek"
+        reason
       )
     );
     return identity;
+  }
+  requestExact(frame) {
+    this.cancelScheduledScrub();
+    const generation = this.nextGeneration;
+    this.nextGeneration += 1;
+    return this.sendRequest(frame, generation, "seek");
+  }
+  requestPlayback(frame, restart = false) {
+    this.cancelScheduledScrub();
+    const generation = restart ? this.nextGeneration : Math.max(0, this.nextGeneration - 1);
+    if (restart) {
+      this.nextGeneration += 1;
+    }
+    return this.sendRequest(frame, generation, "playback");
   }
   scheduleScrub(frame) {
     this.pendingFrame = this.clamp(frame);
@@ -765,12 +965,32 @@ function render({ model, el, signal }) {
   let metadata;
   let playerView;
   let seekScheduler;
+  let playbackController;
   let currentRequest;
+  let resumeAfterPaint;
+  let resumeAfterScrub = false;
+  let autoplayPending = false;
+  let resumeAfterVisibility = false;
   const updateStatus = (text) => {
     const liveStatus = el.querySelector("[role='status']");
     if (liveStatus !== null) {
       liveStatus.textContent = text;
     }
+  };
+  const playWhenVisible = () => {
+    if (document.visibilityState === "hidden") {
+      resumeAfterVisibility = true;
+      return;
+    }
+    resumeAfterVisibility = false;
+    playbackController?.play();
+  };
+  const togglePlaying = () => {
+    autoplayPending = false;
+    resumeAfterPaint = void 0;
+    resumeAfterScrub = false;
+    resumeAfterVisibility = false;
+    playbackController?.toggle();
   };
   const handleMessage = async (value, buffers) => {
     try {
@@ -794,14 +1014,43 @@ function render({ model, el, signal }) {
             el,
             message,
             {
-              requestExact: (frame) => seekScheduler?.requestExact(frame).frame ?? 0,
+              requestExact: (frame) => {
+                playbackController?.pause(false);
+                const request = seekScheduler?.requestExact(frame);
+                if (request === void 0) {
+                  return 0;
+                }
+                if (resumeAfterScrub) {
+                  resumeAfterPaint = request;
+                  resumeAfterScrub = false;
+                } else {
+                  resumeAfterPaint = void 0;
+                }
+                return request.frame;
+              },
               scheduleScrub: (frame) => {
+                if (playbackController?.playing || resumeAfterPaint !== void 0 || resumeAfterScrub) {
+                  resumeAfterScrub = true;
+                }
+                resumeAfterPaint = void 0;
+                playbackController?.pause(false);
                 currentRequest = void 0;
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
-              }
+              },
+              togglePlaying
             },
             signal
           );
+          playbackController = new PlaybackController({
+            numFrames: message.num_frames,
+            fpsNum: message.fps_num,
+            fpsDen: message.fps_den,
+            scheduler: seekScheduler,
+            onFrame: (frame) => playerView?.setFrame(frame),
+            onPlaying: (playing) => playerView?.setPlaying(playing),
+            sendPlaying: (playing) => model.send(createSetPlayingMessage(sessionId, playing))
+          });
+          autoplayPending = message.autoplay;
           seekScheduler.requestExact(0);
           return;
         }
@@ -821,7 +1070,18 @@ function render({ model, el, signal }) {
         const isCurrent = () => !signal.aborted && expected !== void 0 && currentRequest === expected && message.request_id === expected.request_id && message.generation === expected.generation && message.frame === expected.frame && manifestClipIds.length === expectedClipIds.length && manifestClipIds.every(
           (clipId, index) => clipId === expectedClipIds[index]
         );
+        const acknowledge = (outcome) => {
+          model.send(
+            createFrameSetAck(
+              sessionId,
+              message.request_id,
+              message.generation,
+              outcome
+            )
+          );
+        };
         if (!isCurrent()) {
+          acknowledge("stale");
           return;
         }
         let painted;
@@ -835,12 +1095,31 @@ function render({ model, el, signal }) {
           );
         } catch (error) {
           if (!isCurrent()) {
+            acknowledge("stale");
             return;
           }
+          acknowledge("decode_error");
+          playbackController?.pause(false);
           throw error;
         }
         if (painted) {
+          playbackController?.setCurrentFrame(message.frame);
           updateStatus(`Frame ${message.frame} ready.`);
+          acknowledge("painted");
+          const shouldResume = resumeAfterPaint !== void 0 && message.request_id === resumeAfterPaint.request_id && message.generation === resumeAfterPaint.generation && message.frame === resumeAfterPaint.frame;
+          if (shouldResume) {
+            resumeAfterPaint = void 0;
+            if (message.frame < metadata.num_frames - 1) {
+              playWhenVisible();
+            }
+          } else if (autoplayPending) {
+            autoplayPending = false;
+            if (message.frame < metadata.num_frames - 1) {
+              playWhenVisible();
+            }
+          }
+        } else {
+          acknowledge("stale");
         }
         return;
       }
@@ -862,9 +1141,24 @@ function render({ model, el, signal }) {
     void handleMessage(value, buffers);
   };
   model.on("msg:custom", onMessage);
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      if (playbackController?.playing) {
+        const pausedFrame = playbackController.pause(false);
+        resumeAfterVisibility = metadata !== void 0 && pausedFrame < metadata.num_frames - 1;
+        currentRequest = void 0;
+      }
+    } else if (resumeAfterVisibility) {
+      playWhenVisible();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange, {
+    signal
+  });
   signal.addEventListener(
     "abort",
     () => {
+      playbackController?.close();
       seekScheduler?.close();
       model.off("msg:custom", onMessage);
     },

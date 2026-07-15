@@ -256,21 +256,21 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Play/pause, autoplay-after-ready, end pause, and replay-from-zero behavior match the spec.
-- [ ] Desired frame comes from a clock anchor rather than chained timer increments.
-- [ ] Playback order is monotonic except after an explicit seek or restart.
-- [ ] Total submitted clip-frame futures never exceed `max_in_flight` and active clips receive fair scheduling.
-- [ ] At most one delivered frame set is unacknowledged by default.
-- [ ] ACK outcomes `painted`, `stale`, and `decode_error` drive delivery correctly.
-- [ ] The latest desired playback set replaces obsolete queued work; unavoidable stale completions cannot paint.
-- [ ] The per-session LRU enforces count and byte budgets and never stores open `VideoFrame` objects.
-- [ ] Hidden documents pause and resume only when playback was active before hiding.
+- [x] Play/pause, autoplay-after-ready, end pause, and replay-from-zero behavior match the spec.
+- [x] Desired frame comes from a clock anchor rather than chained timer increments.
+- [x] Playback order is monotonic except after an explicit seek or restart.
+- [x] Total submitted clip-frame futures never exceed `max_in_flight` and active clips receive fair scheduling.
+- [x] At most one delivered frame set is unacknowledged by default.
+- [x] ACK outcomes `painted`, `stale`, and `decode_error` drive delivery correctly.
+- [x] The latest desired playback set replaces obsolete queued work; unavoidable stale completions cannot paint.
+- [x] The per-session LRU enforces count and byte budgets and never stores open `VideoFrame` objects.
+- [x] Hidden documents pause and resume only when playback was active before hiding.
 
 **Verification:**
 
-- [ ] `hatch run test:pytest tests/python/test_scheduler.py tests/python/test_lifecycle.py -k "playback or ack or cache or bound or fair"`
-- [ ] `npm test -- --run tests/frontend/player.test.ts tests/frontend/scheduler.test.ts -t "playback|visibility|ack"`
-- [ ] `npm run test:e2e -- --grep "play pause|slow playback|visibility"`
+- [x] `.venv/bin/hatch run test:pytest tests/python/test_scheduler.py tests/python/test_session.py tests/python/test_cache.py tests/python/test_widget.py -k "fair or stale or ack or cache or bound or reentrant or autoplay or playing"`
+- [x] `npm test -- --run tests/frontend/player.test.ts tests/frontend/scheduler.test.ts tests/frontend/playback-lifecycle.test.ts tests/frontend/comparison.test.ts tests/frontend/protocol.test.ts`
+- [x] `npm run test:e2e -- --grep "playback pauses|slow playback|visibility resumes"`
 
 ## T9: Interactive Comparison Modes
 

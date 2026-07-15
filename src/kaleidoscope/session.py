@@ -5,8 +5,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from threading import Lock, RLock
 from time import perf_counter
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+from .cache import DEFAULT_CACHE_BYTE_BUDGET, ByteBoundedLRU
 from .encoding import MAX_ENCODED_FRAME_BYTES, EncodedImage, Encoder, create_encoder
 from .frame_adapter import RGB24Frame, interleave_rgb24
 from .protocol import FrameManifest, frame_set_message, runtime_error_message
@@ -44,6 +45,15 @@ class _SubmissionState:
     render_started: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class _CompletedFrameSet:
+    request_id: int
+    generation: int
+    frame: int
+    message: dict[str, object]
+    buffers: list[bytes]
+
+
 class PreviewSession:
     def __init__(
         self,
@@ -68,6 +78,11 @@ class PreviewSession:
         self._current_request: _FrameSetRequest | None = None
         self._last_request_id = -1
         self._last_generation = -1
+        self._unacknowledged: _CompletedFrameSet | None = None
+        self._pending_delivery: _CompletedFrameSet | None = None
+        self._cache: ByteBoundedLRU[tuple[ClipId, int], _CompletedFrame] = (
+            ByteBoundedLRU(config.cache_size, DEFAULT_CACHE_BYTE_BUDGET)
+        )
         self._scheduler = FrameSetScheduler(config.max_in_flight)
         self._closed = False
 
@@ -78,7 +93,40 @@ class PreviewSession:
                 if self._current_request is not None:
                     self._current_request.completed.clear()
                 self._current_request = None
+                self._unacknowledged = None
+                self._pending_delivery = None
+                self._cache.clear()
             self._scheduler.close()
+
+    def ack_frame_set(
+        self,
+        *,
+        request_id: int,
+        generation: int,
+        outcome: Literal["painted", "stale", "decode_error"],
+    ) -> int:
+        with self._delivery_lock:
+            with self._lock:
+                acknowledged = self._unacknowledged
+                if (
+                    acknowledged is None
+                    or acknowledged.request_id != request_id
+                    or acknowledged.generation != generation
+                ):
+                    raise ValueError(
+                        "Frame-set ACK does not match the unacknowledged delivery."
+                    )
+                self._unacknowledged = None
+                if outcome == "decode_error":
+                    self._pending_delivery = None
+                    next_delivery = None
+                else:
+                    next_delivery = self._pending_delivery
+                    self._pending_delivery = None
+                    self._unacknowledged = next_delivery
+            if next_delivery is not None:
+                self._send(next_delivery.message, next_delivery.buffers)
+            return acknowledged.frame
 
     def _is_current(self, request: _FrameSetRequest) -> bool:
         with self._lock:
@@ -160,6 +208,14 @@ class PreviewSession:
             ) -> Any | None:
                 if not self._is_current(request):
                     return None
+                cached = self._cache.get((submitted_clip.id, frame))
+                if cached is not None:
+                    self._record_completed_frame(
+                        request=request,
+                        clip_id=submitted_clip.id,
+                        completed=cached,
+                    )
+                    return None
                 state.render_started = self._clock()
                 node = cast(Any, submitted_clip.node)
                 return node.get_frame_async(frame)
@@ -220,8 +276,74 @@ class PreviewSession:
                 self._last_generation = generation
                 if self._current_request is not None:
                     self._current_request.completed.clear()
+                self._pending_delivery = None
                 self._current_request = request
             self._scheduler.replace_pending(scheduled_frames)
+
+    def _record_completed_frame(
+        self,
+        *,
+        request: _FrameSetRequest,
+        clip_id: ClipId,
+        completed: _CompletedFrame,
+        cache: bool = False,
+    ) -> None:
+        with self._delivery_lock:
+            with self._lock:
+                if self._closed or self._current_request is not request:
+                    return
+                request.completed[clip_id] = completed
+                if cache:
+                    self._cache.put(
+                        (clip_id, request.frame),
+                        completed,
+                        len(completed.encoded.data),
+                    )
+                if len(request.completed) != len(request.clip_ids):
+                    return
+                completed_frames = [
+                    request.completed[completed_clip_id]
+                    for completed_clip_id in request.clip_ids
+                ]
+                manifests: list[FrameManifest] = []
+                buffers: list[bytes] = []
+                for buffer_index, (completed_clip_id, completed_frame) in enumerate(
+                    zip(request.clip_ids, completed_frames, strict=True)
+                ):
+                    manifests.append(
+                        {
+                            "clip_id": completed_clip_id,
+                            "buffer_index": buffer_index,
+                            "mime": completed_frame.encoded.mime,
+                            "byte_length": len(completed_frame.encoded.data),
+                            "render_ms": completed_frame.render_ms,
+                            "encode_ms": completed_frame.encode_ms,
+                        }
+                    )
+                    buffers.append(completed_frame.encoded.data)
+                outbound = frame_set_message(
+                    self._session_id,
+                    request_id=request.request_id,
+                    generation=request.generation,
+                    frame=request.frame,
+                    frames=manifests,
+                )
+                self._current_request = None
+                completed_set = _CompletedFrameSet(
+                    request_id=request.request_id,
+                    generation=request.generation,
+                    frame=request.frame,
+                    message=outbound,
+                    buffers=buffers,
+                )
+                if self._unacknowledged is None:
+                    self._unacknowledged = completed_set
+                    deliver = completed_set
+                else:
+                    self._pending_delivery = completed_set
+                    deliver = None
+            if deliver is not None:
+                self._send(deliver.message, deliver.buffers)
 
     def _complete_frame(
         self,
@@ -286,42 +408,13 @@ class PreviewSession:
         finally:
             frame.close()
 
-        with self._delivery_lock:
-            with self._lock:
-                if self._closed or self._current_request is not request:
-                    return
-                request.completed[clip.id] = _CompletedFrame(
-                    encoded=encoded,
-                    render_ms=render_ms,
-                    encode_ms=encode_ms,
-                )
-                if len(request.completed) != len(request.clip_ids):
-                    return
-                completed_frames = [
-                    request.completed[clip_id] for clip_id in request.clip_ids
-                ]
-                manifests: list[FrameManifest] = []
-                buffers: list[bytes] = []
-                for buffer_index, (clip_id, completed_frame) in enumerate(
-                    zip(request.clip_ids, completed_frames, strict=True)
-                ):
-                    manifests.append(
-                        {
-                            "clip_id": clip_id,
-                            "buffer_index": buffer_index,
-                            "mime": completed_frame.encoded.mime,
-                            "byte_length": len(completed_frame.encoded.data),
-                            "render_ms": completed_frame.render_ms,
-                            "encode_ms": completed_frame.encode_ms,
-                        }
-                    )
-                    buffers.append(completed_frame.encoded.data)
-                outbound = frame_set_message(
-                    self._session_id,
-                    request_id=request.request_id,
-                    generation=request.generation,
-                    frame=request.frame,
-                    frames=manifests,
-                )
-                self._current_request = None
-            self._send(outbound, buffers)
+        self._record_completed_frame(
+            request=request,
+            clip_id=clip.id,
+            completed=_CompletedFrame(
+                encoded=encoded,
+                render_ms=render_ms,
+                encode_ms=encode_ms,
+            ),
+            cache=True,
+        )

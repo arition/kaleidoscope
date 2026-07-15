@@ -366,6 +366,7 @@ def test_pair_and_visible_defaults_are_deterministic() -> None:
         ({"max_visible_clips": 0}, "too_many_visible_clips"),
         ({"max_visible_clips": True}, "too_many_visible_clips"),
         ({"max_in_flight": True}, "invalid_clip"),
+        ({"autoplay": 1}, "invalid_clip"),
         ({"codec": "png"}, "invalid_encoding"),
         ({"codec": "jpeg", "quality": 96}, "invalid_encoding"),
         ({"codec": "webp", "quality": 101}, "invalid_encoding"),

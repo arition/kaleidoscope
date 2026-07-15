@@ -26,6 +26,7 @@ describe("metadata presentation", () => {
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -76,6 +77,7 @@ describe("metadata presentation", () => {
       mode: "single",
       active_clip_ids: ["B"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "A",
@@ -131,6 +133,7 @@ describe("metadata presentation", () => {
       mode: "single",
       active_clip_ids: ["Filtered"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Filtered",
@@ -199,6 +202,7 @@ describe("metadata presentation", () => {
       mode: "single",
       active_clip_ids: ["Source"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -310,6 +314,7 @@ describe("metadata presentation", () => {
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -418,6 +423,7 @@ describe("metadata presentation", () => {
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -499,6 +505,7 @@ describe("metadata presentation", () => {
       mode: "single",
       active_clip_ids: ["Source"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -600,6 +607,7 @@ describe("metadata presentation", () => {
       mode: "single",
       active_clip_ids: ["Source"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -665,5 +673,88 @@ describe("metadata presentation", () => {
         message.type === "request_frame_set",
     );
     expect(requests.map((request) => request.frame)).toEqual([0, 1, 24, 239, 0]);
+  });
+
+  it("plays from a rational clock and pauses from the visible control", () => {
+    let scheduled: FrameRequestCallback | undefined;
+    const cancel = vi.fn();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        scheduled = callback;
+        return 23;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", cancel);
+    vi.spyOn(performance, "now").mockReturnValue(100);
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 100,
+      fps_num: 24000,
+      fps_den: 1001,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      max_visible_clips: 4,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 64,
+          source_height: 48,
+          output_width: 64,
+          output_height: 48,
+          warnings: [],
+        },
+      ],
+    });
+
+    const play = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Play']",
+    );
+    expect(play).not.toBeNull();
+    play?.click();
+    expect(
+      element.querySelector("button[aria-label='Pause']"),
+    ).not.toBeNull();
+
+    scheduled?.(1101);
+
+    const requests = model.sent.filter(
+      (message): message is Record<string, unknown> =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+    expect(requests).toMatchObject([
+      { request_id: 0, generation: 0, frame: 0, reason: "seek" },
+      { request_id: 1, generation: 0, frame: 24, reason: "playback" },
+    ]);
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "set_playing",
+      session_id: "session-1",
+      playing: true,
+    });
+
+    element
+      .querySelector<HTMLButtonElement>("button[aria-label='Pause']")
+      ?.click();
+    expect(cancel).toHaveBeenCalledWith(23);
+    expect(model.sent.at(-1)).toEqual({
+      protocol: 1,
+      type: "set_playing",
+      session_id: "session-1",
+      playing: false,
+    });
   });
 });

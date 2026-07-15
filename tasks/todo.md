@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T7 complete; T8 and T9 are next
+Status: G1 approved; T8 complete; T9 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.5 approved
 
@@ -67,11 +67,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Coalesce scrubs with latest-generation-wins behavior.
   - [x] Prove exact first/middle/last synchronized seeks and no stale overwrite.
 
-- [ ] **T8 - Clock-correct bounded playback** (depends on T7)
-  - [ ] Add play/pause, autoplay-after-ready, end, restart, and visibility behavior.
-  - [ ] Implement clock-derived desired frames and obsolete-frame dropping.
-  - [ ] Enforce fair global in-flight and one-set ACK delivery bounds.
-  - [ ] Add bounded per-session count/byte LRU behavior.
+- [x] **T8 - Clock-correct bounded playback** (depends on T7)
+  - [x] Add play/pause, autoplay-after-ready, end, restart, and visibility behavior.
+  - [x] Implement clock-derived desired frames and obsolete-frame dropping.
+  - [x] Enforce fair global in-flight and one-set ACK delivery bounds.
+  - [x] Add bounded per-session count/byte LRU behavior.
 
 - [ ] **T9 - Interactive comparison modes** (depends on T7; coordinate with T8)
   - [ ] Add single and one-to-four side-by-side selectors.

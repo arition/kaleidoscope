@@ -558,6 +558,8 @@ def build_preview_config(
         )
     if not isinstance(lossless, bool):
         raise KaleidoscopeError("invalid_encoding", "lossless must be a boolean.")
+    if not isinstance(autoplay, bool):
+        raise KaleidoscopeError("invalid_clip", "autoplay must be a boolean.")
     maximum_quality = 95 if codec == "jpeg" else 100
     if (
         not isinstance(quality, int)

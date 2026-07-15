@@ -144,6 +144,7 @@ describe("widget render", () => {
       mode: "single",
       active_clip_ids: ["Source"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",

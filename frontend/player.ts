@@ -14,11 +14,14 @@ import {
 export interface PlayerView {
   readonly metadata: PreviewMetadataMessage;
   readonly canvases: Map<ClipId, HTMLCanvasElement>;
+  setFrame(frame: number): void;
+  setPlaying(playing: boolean): void;
 }
 
 export interface PlayerNavigation {
   requestExact(frame: number): number;
   scheduleScrub(frame: number): number;
+  togglePlaying(): void;
 }
 
 function idsMatch(left: ClipId, right: ClipId): boolean {
@@ -134,6 +137,21 @@ export function renderMetadata(
     return button;
   };
 
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "kaleidoscope-control-button";
+  play.disabled = navigation === undefined;
+  let playing = false;
+  const updatePlaying = (active: boolean): void => {
+    playing = active;
+    play.setAttribute("aria-label", active ? "Pause" : "Play");
+    play.title = active ? "Pause" : "Play";
+    play.textContent = active ? "||" : ">";
+    play.setAttribute("aria-pressed", String(active));
+  };
+  updatePlaying(false);
+  play.addEventListener("click", () => navigation?.togglePlaying(), { signal });
+
   const seek = document.createElement("input");
   seek.type = "range";
   seek.className = "kaleidoscope-seek";
@@ -247,6 +265,7 @@ export function renderMetadata(
   );
 
   controls.append(
+    play,
     first,
     previous,
     seek,
@@ -274,7 +293,10 @@ export function renderMetadata(
       if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.key === "ArrowLeft") {
+      if (event.key === " ") {
+        event.preventDefault();
+        navigation?.togglePlaying();
+      } else if (event.key === "ArrowLeft") {
         event.preventDefault();
         requestExact(
           event.shiftKey
@@ -328,7 +350,12 @@ export function renderMetadata(
   status.textContent = "Kaleidoscope is ready.";
 
   root.replaceChildren(header, timeline, controls, clips, status);
-  return { metadata: message, canvases };
+  return {
+    metadata: message,
+    canvases,
+    setFrame: updateFrame,
+    setPlaying: updatePlaying,
+  };
 }
 
 interface DecodedFrame {

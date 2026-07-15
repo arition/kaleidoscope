@@ -25,6 +25,24 @@ export interface RequestFrameSetMessage {
   reason: FrameRequestReason;
 }
 
+export type FrameSetAckOutcome = "painted" | "stale" | "decode_error";
+
+export interface AckFrameSetMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "ack_frame_set";
+  session_id: string;
+  request_id: number;
+  generation: number;
+  outcome: FrameSetAckOutcome;
+}
+
+export interface SetPlayingMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "set_playing";
+  session_id: string;
+  playing: boolean;
+}
+
 export interface MetadataMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "metadata";
@@ -68,6 +86,7 @@ export interface PreviewMetadataMessage extends MetadataMessage {
   mode: ComparisonMode;
   active_clip_ids: ClipId[];
   max_visible_clips: number;
+  autoplay: boolean;
   clips: ClipMetadata[];
 }
 
@@ -236,6 +255,7 @@ function hasPreviewMetadataFields(value: Record<string, unknown>): boolean {
     "mode",
     "active_clip_ids",
     "max_visible_clips",
+    "autoplay",
     "clips",
   ].some((key) => key in value);
 }
@@ -250,6 +270,7 @@ function isPreviewMetadataMessage(
     !isComparisonMode(value.mode) ||
     !isPositiveInteger(value.max_visible_clips) ||
     value.max_visible_clips > 4 ||
+    typeof value.autoplay !== "boolean" ||
     !Array.isArray(value.active_clip_ids) ||
     value.active_clip_ids.length === 0 ||
     !value.active_clip_ids.every(isClipId) ||
@@ -299,6 +320,34 @@ export function createFrameSetRequest(
     frame,
     clip_ids: [...clipIds],
     reason,
+  };
+}
+
+export function createFrameSetAck(
+  sessionId: string,
+  requestId: number,
+  generation: number,
+  outcome: FrameSetAckOutcome,
+): AckFrameSetMessage {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "ack_frame_set",
+    session_id: sessionId,
+    request_id: requestId,
+    generation,
+    outcome,
+  };
+}
+
+export function createSetPlayingMessage(
+  sessionId: string,
+  playing: boolean,
+): SetPlayingMessage {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "set_playing",
+    session_id: sessionId,
+    playing,
   };
 }
 

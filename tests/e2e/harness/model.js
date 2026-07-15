@@ -13,6 +13,12 @@ const showWebp = new URLSearchParams(window.location.search).get("codec") === "w
 const testRapidSeek = new URLSearchParams(window.location.search).has(
   "rapid-seek",
 );
+const testPlayback = new URLSearchParams(window.location.search).has(
+  "playback",
+);
+const testSlowPlayback = new URLSearchParams(window.location.search).has(
+  "slow-playback",
+);
 const clipId = showConversionWarning ? "Filtered" : "Source";
 const activeClipIds = showSideBySide ? ["Source", "Filtered"] : [clipId];
 
@@ -54,12 +60,13 @@ const model = {
           type: "metadata",
           session_id: sessionId,
           status: "initialized",
-          num_frames: testRapidSeek ? 10 : 1,
-          fps_num: 24,
+          num_frames: testRapidSeek ? 10 : testPlayback ? 4 : testSlowPlayback ? 6 : 1,
+          fps_num: testSlowPlayback ? 8 : 24,
           fps_den: 1,
           mode: showSideBySide ? "side-by-side" : "single",
           active_clip_ids: activeClipIds,
           max_visible_clips: 4,
+          autoplay: false,
           clips: showSideBySide
             ? [clip("Source"), clip("Filtered")]
             : [
@@ -90,7 +97,12 @@ const model = {
       const fixtureNames = showSideBySide
         ? ["frame.jpg", "filtered.jpg"]
         : [showWebp ? "frame.webp" : "frame.jpg"];
-      const responseDelay = testRapidSeek && message.frame === 2 ? 120 : 0;
+      const responseDelay =
+        testRapidSeek && message.frame === 2
+          ? 120
+          : testSlowPlayback && message.frame === 1
+            ? 800
+            : 0;
       void Promise.all(
         fixtureNames.map((name) =>
           fetch(`./${name}`).then((response) => response.arrayBuffer()),

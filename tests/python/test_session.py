@@ -62,6 +62,7 @@ class FakeVideoNode:
 def make_config(
     node: FakeVideoNode,
     *additional_clips: tuple[str, FakeVideoNode],
+    cache_size: int = 32,
 ) -> PreviewConfig:
     clips = [
         NormalizedClip(
@@ -102,7 +103,7 @@ def make_config(
         codec="jpeg",
         quality=80,
         lossless=False,
-        cache_size=32,
+        cache_size=cache_size,
         max_in_flight=4,
         autoplay=False,
     )
@@ -489,6 +490,248 @@ def test_session_accepts_increasing_request_id_with_same_generation() -> None:
     assert sent[0][0]["request_id"] == 3
     assert sent[0][0]["generation"] == 2
     assert sent[0][0]["frame"] == 3
+
+
+def test_ack_window_releases_only_the_latest_completed_frame_set() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    assert [message["frame"] for message, _ in sent] == [0]
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    assert [message["frame"] for message, _ in sent] == [0]
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=2,
+        generation=0,
+        frame=2,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    assert [message["frame"] for message, _ in sent] == [0]
+
+    assert (
+        session.ack_frame_set(
+            request_id=0,
+            generation=0,
+            outcome="painted",
+        )
+        == 0
+    )
+    assert [message["frame"] for message, _ in sent] == [0, 2]
+
+
+def test_ack_window_drops_completed_pending_set_when_newer_request_starts() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=2,
+        generation=0,
+        frame=2,
+        clip_ids=("Source",),
+    )
+    session.ack_frame_set(request_id=0, generation=0, outcome="painted")
+
+    assert [message["frame"] for message, _ in sent] == [0]
+
+    node.future.set_result(FakeFrame())
+
+    assert [message["frame"] for message, _ in sent] == [0, 2]
+
+
+def test_decode_error_ack_clears_pending_delivery() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    assert (
+        session.ack_frame_set(
+            request_id=0,
+            generation=0,
+            outcome="decode_error",
+        )
+        == 0
+    )
+    assert [message["frame"] for message, _ in sent] == [0]
+
+
+def test_ack_rejects_unknown_delivery_identity() -> None:
+    node = FakeVideoNode()
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: None,
+    )
+
+    with pytest.raises(ValueError, match="does not match"):
+        session.ack_frame_set(
+            request_id=7,
+            generation=0,
+            outcome="stale",
+        )
+
+
+def test_encoded_frame_cache_reuses_an_acknowledged_frame() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    encode_calls = 0
+
+    def encode(pixels: bytes, width: int, height: int, quality: int) -> EncodedImage:
+        nonlocal encode_calls
+        del width, height, quality
+        encode_calls += 1
+        return EncodedImage(mime="image/jpeg", data=b"encoded:" + pixels)
+
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node, cache_size=1),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=encode,
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    session.ack_frame_set(request_id=0, generation=0, outcome="painted")
+
+    session.request_frame_set(
+        request_id=1,
+        generation=1,
+        frame=0,
+        clip_ids=("Source",),
+    )
+
+    assert node.requested == [0]
+    assert encode_calls == 1
+    assert [message["request_id"] for message, _ in sent] == [0, 1]
+    assert sent[1][1] == sent[0][1]
+
+
+def test_encoded_frame_cache_evicts_least_recently_used_entry() -> None:
+    node = FakeVideoNode()
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node, cache_size=1),
+        send=lambda message, buffers: None,
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    session.ack_frame_set(request_id=0, generation=0, outcome="painted")
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=1,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    session.ack_frame_set(request_id=1, generation=1, outcome="painted")
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=2,
+        generation=2,
+        frame=0,
+        clip_ids=("Source",),
+    )
+
+    assert node.requested == [0, 1, 0]
 
 
 def test_frame_set_rejects_duplicate_and_unknown_clip_ids() -> None:

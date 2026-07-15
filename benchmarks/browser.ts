@@ -69,6 +69,7 @@ function createMetadata(fixture: BrowserFixture): PreviewMetadataMessage {
     mode: clipIds.length === 1 ? "single" : "side-by-side",
     active_clip_ids: clipIds,
     max_visible_clips: 4,
+    autoplay: false,
     clips: clipIds.map((clipId: ClipId) => ({
       id: clipId,
       label: String(clipId),

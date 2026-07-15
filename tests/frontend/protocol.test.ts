@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   PROTOCOL_VERSION,
   ProtocolError,
+  createFrameSetAck,
   createReadyMessage,
+  createSetPlayingMessage,
   parseBackendMessage,
   validateFrameSetBuffers,
 } from "../../frontend/protocol.js";
@@ -20,6 +22,32 @@ describe("protocol v1", () => {
     });
   });
 
+  it("creates frame-set acknowledgements for every terminal outcome", () => {
+    expect(createFrameSetAck("session-1", 7, 2, "painted")).toEqual({
+      protocol: 1,
+      type: "ack_frame_set",
+      session_id: "session-1",
+      request_id: 7,
+      generation: 2,
+      outcome: "painted",
+    });
+    expect(createFrameSetAck("session-1", 8, 2, "stale").outcome).toBe(
+      "stale",
+    );
+    expect(createFrameSetAck("session-1", 9, 2, "decode_error").outcome).toBe(
+      "decode_error",
+    );
+  });
+
+  it("creates an explicit playing-state message", () => {
+    expect(createSetPlayingMessage("session-1", true)).toEqual({
+      protocol: 1,
+      type: "set_playing",
+      session_id: "session-1",
+      playing: true,
+    });
+  });
+
   it("accepts initialized metadata", () => {
     expect(
       parseBackendMessage({
@@ -33,6 +61,7 @@ describe("protocol v1", () => {
         mode: "side-by-side",
         active_clip_ids: ["Source", "Filtered"],
         max_visible_clips: 4,
+        autoplay: false,
         clips: [
           {
             id: "Source",
@@ -67,6 +96,7 @@ describe("protocol v1", () => {
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
       max_visible_clips: 4,
+      autoplay: false,
       clips: [
         {
           id: "Source",
@@ -101,6 +131,35 @@ describe("protocol v1", () => {
         status: "initialized",
       }),
     ).toThrowError(new ProtocolError("protocol_mismatch", "Unsupported protocol version 2; expected 1."));
+  });
+
+  it("rejects preview metadata without an autoplay decision", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 1,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "single",
+        active_clip_ids: ["Source"],
+        max_visible_clips: 4,
+        clips: [
+          {
+            id: "Source",
+            label: "Source",
+            source_format: "RGB24",
+            source_width: 1,
+            source_height: 1,
+            output_width: 1,
+            output_height: 1,
+            warnings: [],
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
   });
 
   it("rejects malformed metadata", () => {
