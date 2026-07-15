@@ -119,6 +119,30 @@ def test_mapping_preserves_ids_labels_order_and_original_dimensions() -> None:
     assert config.active_clip_ids == ("Source", "Filtered")
 
 
+@pytest.mark.parametrize(
+    "clips",
+    [
+        {True: FakeVideoNode()},
+        {2**53: FakeVideoNode()},
+    ],
+)
+def test_mapping_rejects_ids_that_are_not_stable_javascript_values(
+    clips: dict[object, FakeVideoNode],
+) -> None:
+    with pytest.raises(KaleidoscopeError, match="Clip ID"):
+        build_preview_config(clips, runtime=make_runtime())
+
+
+@pytest.mark.parametrize("primary", [False, True, 2**53])
+def test_selectors_reject_invalid_or_unsafe_clip_ids(primary: object) -> None:
+    with pytest.raises(KaleidoscopeError, match="Clip ID"):
+        build_preview_config(
+            [FakeVideoNode(), FakeVideoNode()],
+            primary=primary,  # type: ignore[arg-type]
+            runtime=make_runtime(),
+        )
+
+
 def test_registry_is_snapshotted_sorted_and_ignores_audio() -> None:
     first = FakeVideoNode()
     second = FakeVideoNode()
@@ -365,6 +389,7 @@ def test_pair_and_visible_defaults_are_deterministic() -> None:
         ),
         ({"max_visible_clips": 0}, "too_many_visible_clips"),
         ({"max_visible_clips": True}, "too_many_visible_clips"),
+        ({"overlay_opacity": True}, "comparison_unsupported"),
         ({"max_in_flight": True}, "invalid_clip"),
         ({"autoplay": 1}, "invalid_clip"),
         ({"codec": "png"}, "invalid_encoding"),

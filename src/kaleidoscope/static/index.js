@@ -23,7 +23,7 @@ function isNonnegativeFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 function isClipId(value) {
-  return Number.isInteger(value) && typeof value === "number" || typeof value === "string" && value.length > 0;
+  return Number.isSafeInteger(value) && typeof value === "number" || typeof value === "string" && value.length > 0;
 }
 function isComparisonMode(value) {
   return value === "single" || value === "side-by-side" || value === "wipe" || value === "overlay" || value === "difference";
@@ -57,18 +57,25 @@ function hasPreviewMetadataFields(value) {
     "fps_den",
     "mode",
     "active_clip_ids",
+    "overlay_opacity",
     "max_visible_clips",
     "autoplay",
     "clips"
   ].some((key) => key in value);
 }
 function isPreviewMetadataMessage(value) {
-  if (!isPositiveInteger(value.num_frames) || !isPositiveInteger(value.fps_num) || !isPositiveInteger(value.fps_den) || !isComparisonMode(value.mode) || !isPositiveInteger(value.max_visible_clips) || value.max_visible_clips > 4 || typeof value.autoplay !== "boolean" || !Array.isArray(value.active_clip_ids) || value.active_clip_ids.length === 0 || !value.active_clip_ids.every(isClipId) || !Array.isArray(value.clips) || value.clips.length === 0 || !value.clips.every(isClipMetadata)) {
+  if (!isPositiveInteger(value.num_frames) || !isPositiveInteger(value.fps_num) || !isPositiveInteger(value.fps_den) || !isComparisonMode(value.mode) || !isPositiveInteger(value.max_visible_clips) || value.max_visible_clips > 4 || typeof value.autoplay !== "boolean" || !Array.isArray(value.active_clip_ids) || value.active_clip_ids.length === 0 || !value.active_clip_ids.every(isClipId) || !isNonnegativeFiniteNumber(value.overlay_opacity) || value.overlay_opacity > 1 || !Array.isArray(value.clips) || value.clips.length === 0 || !value.clips.every(isClipMetadata)) {
     return false;
   }
-  const clipIds = value.clips.map((clip) => clip.id);
+  const clips = value.clips;
+  const clipIds = clips.map((clip) => clip.id);
   const activeIds = value.active_clip_ids;
-  return new Set(clipIds).size === clipIds.length && new Set(activeIds).size === activeIds.length && activeIds.length <= value.max_visible_clips && activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId));
+  const activeClips = activeIds.map(
+    (activeId) => clips.find((clip) => clip.id === activeId)
+  );
+  const validCardinality = value.mode === "single" && activeIds.length === 1 || value.mode === "side-by-side" && activeIds.length >= 1 || (value.mode === "wipe" || value.mode === "overlay" || value.mode === "difference") && activeIds.length === 2;
+  const validAlignedGeometry = value.mode === "single" || value.mode === "side-by-side" || activeClips.length === 2 && activeClips[0] !== void 0 && activeClips[1] !== void 0 && activeClips[0].source_width === activeClips[1].source_width && activeClips[0].source_height === activeClips[1].source_height;
+  return new Set(clipIds).size === clipIds.length && new Set(activeIds).size === activeIds.length && activeIds.length <= value.max_visible_clips && activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId)) && validCardinality && validAlignedGeometry;
 }
 function createReadyMessage(sessionId, capabilities) {
   return {
@@ -98,6 +105,17 @@ function createFrameSetAck(sessionId, requestId, generation, outcome) {
     request_id: requestId,
     generation,
     outcome
+  };
+}
+function createSetViewMessage(sessionId, generation, mode, clipIds, overlayOpacity) {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "set_view",
+    session_id: sessionId,
+    generation,
+    mode,
+    clip_ids: [...clipIds],
+    overlay_opacity: overlayOpacity
   };
 }
 function createSetPlayingMessage(sessionId, playing) {
@@ -162,6 +180,548 @@ function parseBackendMessage(value) {
     return value;
   }
   throw new ProtocolError("invalid_message", "Malformed backend message.");
+}
+
+// frontend/comparison.ts
+var alignedModes = /* @__PURE__ */ new Set([
+  "wipe",
+  "overlay",
+  "difference"
+]);
+var idsEqual = (left, right) => left === right;
+var activeSetsEqual = (left, right) => left.length === right.length && left.every((clipId, index) => idsEqual(clipId, right[index]));
+var clipById = (metadata, clipId) => {
+  const clip = metadata.clips.find((candidate) => idsEqual(candidate.id, clipId));
+  if (clip === void 0) {
+    throw new Error(`Unknown clip ID ${String(clipId)}.`);
+  }
+  return clip;
+};
+var normalizeSelection = (metadata, requested) => {
+  const selected = new Set(requested);
+  const normalized = metadata.clips.map((clip) => clip.id).filter((clipId) => selected.has(clipId));
+  if (normalized.length !== selected.size) {
+    throw new Error("The comparison selection contains an unknown clip.");
+  }
+  return normalized;
+};
+var resolvePair = (metadata, current, primary, secondary) => {
+  let first = primary ?? current?.primary ?? metadata.clips[0].id;
+  let firstClip = clipById(metadata, first);
+  const compatible = (clipId) => {
+    if (clipId === void 0 || idsEqual(first, clipId)) {
+      return false;
+    }
+    const clip = clipById(metadata, clipId);
+    return firstClip.source_width === clip.source_width && firstClip.source_height === clip.source_height;
+  };
+  let second = secondary ?? (compatible(current?.secondary) ? current.secondary : metadata.clips.find((clip) => compatible(clip.id))?.id);
+  if (second === void 0 && primary === void 0 && secondary === void 0) {
+    for (const candidate of metadata.clips) {
+      const partner = metadata.clips.find(
+        (clip) => !idsEqual(clip.id, candidate.id) && clip.source_width === candidate.source_width && clip.source_height === candidate.source_height
+      );
+      if (partner !== void 0) {
+        first = candidate.id;
+        firstClip = candidate;
+        second = partner.id;
+        break;
+      }
+    }
+  }
+  if (second === void 0 || idsEqual(first, second)) {
+    throw new Error("Aligned comparison clips must be distinct.");
+  }
+  const secondClip = clipById(metadata, second);
+  if (firstClip.source_width !== secondClip.source_width || firstClip.source_height !== secondClip.source_height) {
+    throw new Error("Aligned comparison clips require matching source dimensions.");
+  }
+  return [first, second];
+};
+var createComparisonState = (metadata) => {
+  const primary = metadata.active_clip_ids[0];
+  const secondary = metadata.active_clip_ids[1];
+  return {
+    mode: metadata.mode,
+    activeClipIds: [...metadata.active_clip_ids],
+    primary,
+    secondary,
+    overlayOpacity: metadata.overlay_opacity,
+    wipePosition: 0.5
+  };
+};
+var transitionComparisonState = (current, metadata, transition) => {
+  const mode = transition.mode ?? current.mode;
+  let primary = transition.primary ?? current.primary;
+  let secondary = transition.secondary ?? current.secondary;
+  let activeClipIds;
+  if (mode === "single") {
+    primary = transition.primary ?? transition.selectedClipIds?.[0] ?? primary;
+    clipById(metadata, primary);
+    secondary = void 0;
+    activeClipIds = [primary];
+  } else if (mode === "side-by-side") {
+    const selected = transition.selectedClipIds ?? current.activeClipIds;
+    activeClipIds = normalizeSelection(metadata, selected);
+    if (activeClipIds.length === 0 || activeClipIds.length > metadata.max_visible_clips) {
+      throw new Error(
+        `Side-by-side comparison requires 1-${metadata.max_visible_clips} clips.`
+      );
+    }
+    primary = activeClipIds[0];
+    secondary = void 0;
+  } else if (alignedModes.has(mode)) {
+    if (metadata.max_visible_clips < 2) {
+      throw new Error(
+        "Aligned comparison exceeds the configured visible-clip limit."
+      );
+    }
+    [primary, secondary] = resolvePair(
+      metadata,
+      current,
+      transition.primary,
+      transition.secondary
+    );
+    activeClipIds = [primary, secondary];
+  } else {
+    throw new Error(`Unsupported comparison mode ${mode}.`);
+  }
+  const state = {
+    mode,
+    activeClipIds,
+    primary,
+    secondary,
+    overlayOpacity: Math.min(
+      1,
+      Math.max(0, transition.overlayOpacity ?? current.overlayOpacity)
+    ),
+    wipePosition: Math.min(
+      1,
+      Math.max(0, transition.wipePosition ?? current.wipePosition)
+    )
+  };
+  return {
+    state,
+    requiresFrameSet: !activeSetsEqual(
+      current.activeClipIds,
+      state.activeClipIds
+    )
+  };
+};
+
+// frontend/comparison-view.ts
+var ALIGNED_MODES = /* @__PURE__ */ new Set([
+  "wipe",
+  "overlay",
+  "difference"
+]);
+var idsMatch = (left, right) => left === right;
+function createComparisonView(options) {
+  const {
+    metadata,
+    canvases,
+    rows,
+    modeLabel,
+    clips,
+    onChange,
+    updateClipRow: updateClipRow2,
+    signal
+  } = options;
+  let state = createComparisonState(metadata);
+  let committedState = state;
+  const toolbar = document.createElement("div");
+  toolbar.className = "kaleidoscope-comparison-toolbar";
+  const modeControl = document.createElement("div");
+  modeControl.className = "kaleidoscope-mode-control";
+  modeControl.setAttribute("role", "group");
+  modeControl.setAttribute("aria-label", "Comparison mode");
+  const selectionControl = document.createElement("div");
+  selectionControl.className = "kaleidoscope-selection-control";
+  toolbar.append(modeControl, selectionControl);
+  const comparison = document.createElement("figure");
+  comparison.className = "kaleidoscope-comparison";
+  comparison.hidden = true;
+  const comparisonLabels = document.createElement("figcaption");
+  comparisonLabels.className = "kaleidoscope-comparison__labels";
+  const comparisonStage = document.createElement("div");
+  comparisonStage.className = "kaleidoscope-comparison__stage";
+  const createComparisonCanvas = () => {
+    const canvas = document.createElement("canvas");
+    canvas.className = "kaleidoscope-comparison__canvas";
+    canvas.setAttribute("role", "img");
+    return canvas;
+  };
+  let comparisonCanvas = createComparisonCanvas();
+  let stagingComparisonCanvas = createComparisonCanvas();
+  comparisonStage.append(comparisonCanvas);
+  const comparisonParameters = document.createElement("div");
+  comparisonParameters.className = "kaleidoscope-comparison__parameters";
+  comparison.append(comparisonLabels, comparisonStage, comparisonParameters);
+  const clipForId = (clipId) => {
+    const clip = metadata.clips.find((candidate) => idsMatch(candidate.id, clipId));
+    if (clip === void 0) {
+      throw new Error(`Unknown clip ID ${String(clipId)}.`);
+    }
+    return clip;
+  };
+  const optionValue = (clipId) => String(metadata.clips.findIndex((clip) => idsMatch(clip.id, clipId)));
+  const optionClipId = (value) => metadata.clips[Number(value)].id;
+  const createClipSelect = (label, selected, onSelect, disabled) => {
+    const select = document.createElement("select");
+    select.className = "kaleidoscope-clip-select";
+    select.setAttribute("aria-label", label);
+    select.disabled = onChange === void 0;
+    for (const clip of metadata.clips) {
+      const option = document.createElement("option");
+      option.value = optionValue(clip.id);
+      option.textContent = clip.label;
+      option.disabled = disabled?.(clip) ?? false;
+      option.selected = idsMatch(clip.id, selected);
+      select.append(option);
+    }
+    select.addEventListener("change", () => onSelect(optionClipId(select.value)), {
+      signal
+    });
+    return select;
+  };
+  const modeButtons = /* @__PURE__ */ new Map();
+  if (metadata.clips.length > 1) {
+    const modes = [
+      ["single", "Single"],
+      ["side-by-side", "Side by side"],
+      ["wipe", "Wipe"],
+      ["overlay", "Overlay"],
+      ["difference", "Difference"]
+    ];
+    const hasAlignedPair = metadata.clips.some(
+      (first, firstIndex) => metadata.clips.some(
+        (second, secondIndex) => firstIndex !== secondIndex && first.source_width === second.source_width && first.source_height === second.source_height
+      )
+    );
+    for (const [value, label] of modes) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "kaleidoscope-mode-button";
+      button.textContent = label;
+      button.title = `${label} view`;
+      button.setAttribute("aria-label", `${label} view`);
+      button.disabled = onChange === void 0 || ALIGNED_MODES.has(value) && (!hasAlignedPair || metadata.max_visible_clips < 2);
+      button.addEventListener("click", () => onChange?.({ mode: value }), {
+        signal
+      });
+      modeButtons.set(value, button);
+      modeControl.append(button);
+    }
+  }
+  const renderSelectionControls = () => {
+    selectionControl.replaceChildren();
+    if (state.mode === "single") {
+      selectionControl.append(
+        createClipSelect(
+          "Solo clip",
+          state.primary,
+          (primary2) => onChange?.({ primary: primary2 })
+        )
+      );
+      return;
+    }
+    if (state.mode === "side-by-side") {
+      const selected = state.activeClipIds;
+      for (const clip of metadata.clips) {
+        const label = document.createElement("label");
+        label.className = "kaleidoscope-clip-toggle";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selected.some((clipId) => idsMatch(clipId, clip.id));
+        checkbox.disabled = onChange === void 0 || (checkbox.checked ? selected.length === 1 : selected.length >= metadata.max_visible_clips);
+        checkbox.setAttribute("aria-label", `Show ${clip.label}`);
+        checkbox.addEventListener(
+          "change",
+          () => {
+            const next = checkbox.checked ? [...selected, clip.id] : selected.filter((clipId) => !idsMatch(clipId, clip.id));
+            onChange?.({ selectedClipIds: next });
+          },
+          { signal }
+        );
+        const text = document.createElement("span");
+        text.textContent = clip.label;
+        label.append(checkbox, text);
+        selectionControl.append(label);
+      }
+      return;
+    }
+    const primaryClip = clipForId(state.primary);
+    const secondary = state.secondary;
+    if (secondary === void 0) {
+      return;
+    }
+    const primary = createClipSelect(
+      "Comparison clip A",
+      state.primary,
+      (primaryId) => onChange?.({ primary: primaryId }),
+      (clip) => !metadata.clips.some(
+        (candidate) => !idsMatch(candidate.id, clip.id) && candidate.source_width === clip.source_width && candidate.source_height === clip.source_height
+      )
+    );
+    const secondarySelect = createClipSelect(
+      "Comparison clip B",
+      secondary,
+      (secondaryId) => onChange?.({ secondary: secondaryId }),
+      (clip) => idsMatch(clip.id, state.primary) || clip.source_width !== primaryClip.source_width || clip.source_height !== primaryClip.source_height
+    );
+    selectionControl.append(primary, secondarySelect);
+  };
+  const renderComparisonParameters = () => {
+    comparisonParameters.replaceChildren();
+    comparisonStage.querySelector(".kaleidoscope-wipe")?.remove();
+    if (state.mode === "wipe") {
+      const wipe = document.createElement("input");
+      wipe.type = "range";
+      wipe.className = "kaleidoscope-wipe";
+      wipe.min = "0";
+      wipe.max = "100";
+      wipe.step = "1";
+      wipe.value = String(Math.round(state.wipePosition * 100));
+      wipe.setAttribute("aria-label", "Wipe position");
+      wipe.addEventListener(
+        "input",
+        () => onChange?.({ wipePosition: Number(wipe.value) / 100 }),
+        { signal }
+      );
+      comparisonStage.append(wipe);
+    } else if (state.mode === "overlay") {
+      const label = document.createElement("label");
+      label.className = "kaleidoscope-parameter";
+      const text = document.createElement("span");
+      text.textContent = "B opacity";
+      const opacity = document.createElement("input");
+      opacity.type = "range";
+      opacity.min = "0";
+      opacity.max = "1";
+      opacity.step = "0.01";
+      opacity.value = String(state.overlayOpacity);
+      opacity.setAttribute("aria-label", "Overlay opacity");
+      const output = document.createElement("output");
+      output.textContent = `${Math.round(state.overlayOpacity * 100)}%`;
+      opacity.addEventListener(
+        "input",
+        () => onChange?.({ overlayOpacity: Number(opacity.value) }),
+        { signal }
+      );
+      label.append(text, opacity, output);
+      comparisonParameters.append(label);
+    } else if (state.mode === "difference") {
+      const note = document.createElement("span");
+      note.className = "kaleidoscope-difference-note";
+      note.textContent = "8-bit visual difference (non-reference)";
+      comparisonParameters.append(note);
+    }
+  };
+  const prepareCommit = (candidateCanvases) => {
+    const next = state;
+    let stagedComparison;
+    let comparisonLabel = "";
+    if (ALIGNED_MODES.has(next.mode)) {
+      const secondary = next.secondary;
+      if (secondary === void 0) {
+        throw new Error("Aligned comparison clips are unavailable.");
+      }
+      const first = candidateCanvases.get(next.primary);
+      const second = candidateCanvases.get(secondary);
+      if (first === void 0 || second === void 0) {
+        throw new Error("Aligned comparison frames are unavailable.");
+      }
+      stagedComparison = stagingComparisonCanvas;
+      stagedComparison.width = first.width;
+      stagedComparison.height = first.height;
+      const context = stagedComparison.getContext("2d");
+      if (context === null) {
+        throw new Error("The comparison canvas is unavailable.");
+      }
+      context.clearRect(0, 0, stagedComparison.width, stagedComparison.height);
+      context.drawImage(first, 0, 0, stagedComparison.width, stagedComparison.height);
+      if (next.mode === "wipe") {
+        context.save();
+        context.beginPath();
+        context.rect(
+          0,
+          0,
+          stagedComparison.width * next.wipePosition,
+          stagedComparison.height
+        );
+        context.clip();
+        context.drawImage(
+          second,
+          0,
+          0,
+          stagedComparison.width,
+          stagedComparison.height
+        );
+        context.restore();
+      } else if (next.mode === "overlay") {
+        context.save();
+        context.globalAlpha = next.overlayOpacity;
+        context.drawImage(
+          second,
+          0,
+          0,
+          stagedComparison.width,
+          stagedComparison.height
+        );
+        context.restore();
+      } else {
+        context.save();
+        context.globalCompositeOperation = "difference";
+        context.drawImage(
+          second,
+          0,
+          0,
+          stagedComparison.width,
+          stagedComparison.height
+        );
+        context.restore();
+      }
+      stagedComparison.setAttribute(
+        "aria-label",
+        `${clipForId(next.primary).label} and ${clipForId(secondary).label}, ${next.mode} comparison`
+      );
+      comparisonLabel = `${clipForId(next.primary).label} (A) | ${clipForId(secondary).label} (B)`;
+    }
+    return () => {
+      const previousState = committedState;
+      const previousModeLabel = modeLabel.textContent;
+      const previousMode = clips.dataset.mode;
+      const previousHidden = comparison.hidden;
+      const previousComparisonLabel = comparisonLabels.textContent;
+      const previousCanvases = new Map(canvases);
+      const previousRowChildren = new Map(
+        Array.from(rows, ([clipId, row]) => [clipId, Array.from(row.childNodes)])
+      );
+      const previousRowActive = new Map(
+        Array.from(rows, ([clipId, row]) => [clipId, row.dataset.active])
+      );
+      const previousCanvasVisibility = new Map(
+        Array.from(canvases, ([clipId, canvas]) => [
+          clipId,
+          {
+            hidden: canvas.hidden,
+            ariaHidden: canvas.getAttribute("aria-hidden")
+          }
+        ])
+      );
+      try {
+        const aligned = ALIGNED_MODES.has(next.mode);
+        modeLabel.textContent = next.mode;
+        clips.dataset.mode = next.mode;
+        comparison.hidden = !aligned;
+        comparisonLabels.textContent = aligned ? comparisonLabel : "";
+        for (const clip of metadata.clips) {
+          const row = rows.get(clip.id);
+          if (row !== void 0) {
+            updateClipRow2(
+              row,
+              clip,
+              next.activeClipIds.some((clipId) => idsMatch(clipId, clip.id)),
+              aligned,
+              canvases
+            );
+          }
+        }
+        if (stagedComparison !== void 0) {
+          comparisonCanvas.replaceWith(stagedComparison);
+          stagingComparisonCanvas = comparisonCanvas;
+          comparisonCanvas = stagedComparison;
+        }
+        committedState = next;
+      } catch (error) {
+        committedState = previousState;
+        modeLabel.textContent = previousModeLabel;
+        if (previousMode === void 0) {
+          delete clips.dataset.mode;
+        } else {
+          clips.dataset.mode = previousMode;
+        }
+        comparison.hidden = previousHidden;
+        comparisonLabels.textContent = previousComparisonLabel;
+        canvases.clear();
+        for (const [clipId, canvas] of previousCanvases) {
+          canvases.set(clipId, canvas);
+        }
+        for (const [clipId, children] of previousRowChildren) {
+          const row = rows.get(clipId);
+          row?.replaceChildren(...children);
+          const active = previousRowActive.get(clipId);
+          if (row !== void 0) {
+            if (active === void 0) {
+              delete row.dataset.active;
+            } else {
+              row.dataset.active = active;
+            }
+          }
+        }
+        for (const [clipId, visibility] of previousCanvasVisibility) {
+          const canvas = previousCanvases.get(clipId);
+          if (canvas !== void 0) {
+            canvas.hidden = visibility.hidden;
+            if (visibility.ariaHidden === null) {
+              canvas.removeAttribute("aria-hidden");
+            } else {
+              canvas.setAttribute("aria-hidden", visibility.ariaHidden);
+            }
+          }
+        }
+        throw error;
+      }
+    };
+  };
+  const compose = () => {
+    state = committedState;
+    prepareCommit(canvases)();
+  };
+  const setState = (next, deferComposition = false) => {
+    const structuralChange = next.mode !== state.mode || next.activeClipIds.length !== state.activeClipIds.length || next.activeClipIds.some(
+      (clipId, index) => !idsMatch(clipId, state.activeClipIds[index])
+    );
+    state = next;
+    for (const [value, button] of modeButtons) {
+      button.setAttribute("aria-pressed", String(value === state.mode));
+    }
+    if (structuralChange) {
+      renderSelectionControls();
+      renderComparisonParameters();
+    } else if (state.mode === "wipe") {
+      const wipe = comparisonStage.querySelector(
+        "input[aria-label='Wipe position']"
+      );
+      if (wipe !== null) {
+        wipe.value = String(Math.round(state.wipePosition * 100));
+      }
+    } else if (state.mode === "overlay") {
+      const opacity = comparisonParameters.querySelector(
+        "input[aria-label='Overlay opacity']"
+      );
+      const output = comparisonParameters.querySelector("output");
+      if (opacity !== null) {
+        opacity.value = String(state.overlayOpacity);
+      }
+      if (output !== null) {
+        output.textContent = `${Math.round(state.overlayOpacity * 100)}%`;
+      }
+    }
+    if (!deferComposition) {
+      prepareCommit(canvases)();
+    }
+  };
+  renderSelectionControls();
+  renderComparisonParameters();
+  setState(state);
+  return {
+    toolbar,
+    view: comparison,
+    compose,
+    prepareCommit,
+    setState
+  };
 }
 
 // frontend/time.ts
@@ -255,12 +815,57 @@ function formatFrameTime(frame, fpsNum, fpsDen) {
 }
 
 // frontend/player.ts
-function idsMatch(left, right) {
+function idsMatch2(left, right) {
   return left === right;
+}
+function createClipWarnings(clip) {
+  const warnings = document.createElement("ul");
+  warnings.className = "kaleidoscope-clip__warnings";
+  warnings.setAttribute("aria-label", `${clip.label} warnings`);
+  warnings.setAttribute("aria-live", "polite");
+  for (const warning of clip.warnings) {
+    const item = document.createElement("li");
+    item.dataset.warningCode = warning.code;
+    item.textContent = warning.message;
+    warnings.append(item);
+  }
+  return warnings;
+}
+function createClipCanvas(clip) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "kaleidoscope-canvas";
+  canvas.width = clip.output_width;
+  canvas.height = clip.output_height;
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", `${clip.label}, frame 0`);
+  return canvas;
+}
+function updateClipRow(row, clip, active, aligned, canvases) {
+  row.dataset.active = String(active);
+  row.querySelector(".kaleidoscope-clip__warnings")?.remove();
+  if (active && clip.warnings.length > 0) {
+    row.append(createClipWarnings(clip));
+  }
+  let canvas = canvases.get(clip.id);
+  if (active && canvas === void 0) {
+    canvas = createClipCanvas(clip);
+    canvases.set(clip.id, canvas);
+    row.append(canvas);
+  } else if (active && canvas !== void 0 && canvas.parentNode !== row) {
+    row.append(canvas);
+  } else if (!active && canvas !== void 0) {
+    canvas.remove();
+    canvases.delete(clip.id);
+    canvas = void 0;
+  }
+  if (canvas !== void 0) {
+    canvas.hidden = aligned;
+    canvas.setAttribute("aria-hidden", String(aligned));
+  }
 }
 function createClipRow(clip, activeClipIds, canvases) {
   const row = document.createElement("li");
-  const isActive = activeClipIds.some((clipId) => idsMatch(clipId, clip.id));
+  const isActive = activeClipIds.some((clipId) => idsMatch2(clipId, clip.id));
   row.className = "kaleidoscope-clip";
   row.dataset.clipId = String(clip.id);
   row.dataset.active = String(isActive);
@@ -283,25 +888,10 @@ function createClipRow(clip, activeClipIds, canvases) {
   details.append(identity, dimensions);
   row.append(details);
   if (isActive && clip.warnings.length > 0) {
-    const warnings = document.createElement("ul");
-    warnings.className = "kaleidoscope-clip__warnings";
-    warnings.setAttribute("aria-label", `${clip.label} warnings`);
-    warnings.setAttribute("aria-live", "polite");
-    for (const warning of clip.warnings) {
-      const item = document.createElement("li");
-      item.dataset.warningCode = warning.code;
-      item.textContent = warning.message;
-      warnings.append(item);
-    }
-    row.append(warnings);
+    row.append(createClipWarnings(clip));
   }
   if (isActive) {
-    const canvas = document.createElement("canvas");
-    canvas.className = "kaleidoscope-canvas";
-    canvas.width = clip.output_width;
-    canvas.height = clip.output_height;
-    canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", `${clip.label}, frame 0`);
+    const canvas = createClipCanvas(clip);
     row.append(canvas);
     canvases.set(clip.id, canvas);
   }
@@ -309,6 +899,7 @@ function createClipRow(clip, activeClipIds, canvases) {
 }
 function renderMetadata(root, message, navigation, signal) {
   const canvases = /* @__PURE__ */ new Map();
+  const rows = /* @__PURE__ */ new Map();
   const header = document.createElement("header");
   header.className = "kaleidoscope-header";
   const title = document.createElement("strong");
@@ -472,7 +1063,7 @@ function renderMetadata(root, message, navigation, signal) {
     "keydown",
     (event) => {
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLElement && target.isContentEditable) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement || target instanceof HTMLElement && target.isContentEditable) {
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -517,25 +1108,60 @@ function renderMetadata(root, message, navigation, signal) {
   clips.className = "kaleidoscope-clips";
   clips.dataset.mode = message.mode;
   clips.setAttribute("aria-label", "Preview clips");
-  clips.append(
-    ...message.clips.map(
-      (clip) => createClipRow(clip, message.active_clip_ids, canvases)
-    )
-  );
+  for (const clip of message.clips) {
+    const row = createClipRow(clip, message.active_clip_ids, canvases);
+    rows.set(clip.id, row);
+    clips.append(row);
+  }
   const status = document.createElement("div");
   status.className = "kaleidoscope-status kaleidoscope-status--ready";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
-  root.replaceChildren(header, timeline, controls, clips, status);
+  const comparison = createComparisonView({
+    metadata: message,
+    canvases,
+    rows,
+    modeLabel: mode,
+    clips,
+    onChange: navigation?.changeComparison === void 0 ? void 0 : (transition) => navigation.changeComparison?.(transition),
+    updateClipRow,
+    signal
+  });
+  root.replaceChildren(
+    header,
+    timeline,
+    comparison.toolbar,
+    controls,
+    comparison.view,
+    clips,
+    status
+  );
   return {
     metadata: message,
     canvases,
+    compose: comparison.compose,
+    getFrame: () => currentFrame,
+    prepareComparisonCommit: comparison.prepareCommit,
+    setComparison: comparison.setState,
     setFrame: updateFrame,
     setPlaying: updatePlaying
   };
 }
-async function decodeFrames(message, buffers) {
+async function decodeFrames(message, buffers, signal) {
+  const decodedFrames = /* @__PURE__ */ new Set();
+  const closeFrame = (frame) => {
+    if (!frame.closed) {
+      frame.closed = true;
+      frame.bitmap.close();
+    }
+  };
+  const closeDecoded = () => {
+    for (const frame of decodedFrames) {
+      closeFrame(frame);
+    }
+  };
+  signal?.addEventListener("abort", closeDecoded, { once: true });
   const results = await Promise.allSettled(
     message.frames.map(async (manifest) => {
       const buffer = buffers[manifest.buffer_index];
@@ -546,10 +1172,19 @@ async function decodeFrames(message, buffers) {
       const blob = new Blob([payload], {
         type: manifest.mime
       });
-      const bitmap = await createImageBitmap(blob);
-      return { manifest, bitmap };
+      const frame = {
+        manifest,
+        bitmap: await createImageBitmap(blob),
+        closed: false
+      };
+      decodedFrames.add(frame);
+      if (signal?.aborted) {
+        closeFrame(frame);
+      }
+      return frame;
     })
   );
+  signal?.removeEventListener("abort", closeDecoded);
   const decoded = results.flatMap(
     (result) => result.status === "fulfilled" ? [result.value] : []
   );
@@ -558,14 +1193,14 @@ async function decodeFrames(message, buffers) {
   );
   if (rejected !== void 0) {
     for (const frame of decoded) {
-      frame.bitmap.close();
+      closeFrame(frame);
     }
     throw rejected.reason;
   }
   return decoded;
 }
-async function paintFrameSet(view, message, buffers, shouldCommit) {
-  const decoded = await decodeFrames(message, buffers);
+async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
+  const decoded = await decodeFrames(message, buffers, signal);
   try {
     if (!shouldCommit()) {
       return false;
@@ -573,20 +1208,24 @@ async function paintFrameSet(view, message, buffers, shouldCommit) {
     const targets = decoded.map((frame) => {
       const currentCanvas = view.canvases.get(frame.manifest.clip_id);
       const parent = currentCanvas?.parentNode;
-      if (currentCanvas === void 0 || parent === null || parent === void 0 || currentCanvas.getContext("2d") === null) {
+      const clip = view.metadata.clips.find(
+        (candidate) => idsMatch2(candidate.id, frame.manifest.clip_id)
+      );
+      if (clip === void 0 || currentCanvas !== void 0 && (parent === null || parent === void 0 || currentCanvas.getContext("2d") === null)) {
         throw new Error("The active preview canvas is unavailable.");
       }
-      const stagedCanvas = currentCanvas.cloneNode(false);
-      const context = stagedCanvas.getContext("2d");
+      const stagedCanvas = currentCanvas?.cloneNode(false);
+      const candidateCanvas = stagedCanvas ?? createClipCanvas(clip);
+      const context = candidateCanvas.getContext("2d");
       if (context === null) {
         throw new Error("The active preview canvas is unavailable.");
       }
       return {
         decoded: frame,
         currentCanvas,
-        stagedCanvas,
+        stagedCanvas: candidateCanvas,
         context,
-        parent
+        parent: parent ?? void 0
       };
     });
     for (const { decoded: frame, stagedCanvas, context } of targets) {
@@ -599,42 +1238,67 @@ async function paintFrameSet(view, message, buffers, shouldCommit) {
       );
       stagedCanvas.setAttribute(
         "aria-label",
-        `${view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`
+        `${view.metadata.clips.find((clip) => idsMatch2(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`
       );
     }
+    if (!shouldCommit()) {
+      return false;
+    }
+    const candidateCanvases = new Map(view.canvases);
+    for (const target of targets) {
+      candidateCanvases.set(
+        target.decoded.manifest.clip_id,
+        target.stagedCanvas
+      );
+    }
+    const commitComparison = view.prepareComparisonCommit(candidateCanvases);
     if (!shouldCommit()) {
       return false;
     }
     const committed = [];
     try {
       for (const target of targets) {
-        target.parent.replaceChild(
-          target.stagedCanvas,
-          target.currentCanvas
-        );
+        if (target.parent !== void 0 && target.currentCanvas !== void 0) {
+          target.parent.replaceChild(
+            target.stagedCanvas,
+            target.currentCanvas
+          );
+        }
         committed.push(target);
       }
+      for (const target of targets) {
+        view.canvases.set(
+          target.decoded.manifest.clip_id,
+          target.stagedCanvas
+        );
+      }
+      commitComparison();
     } catch (error) {
       for (const target of committed.reverse()) {
-        if (target.stagedCanvas.parentNode === target.parent) {
+        if (target.parent !== void 0 && target.currentCanvas !== void 0 && target.stagedCanvas.parentNode === target.parent) {
           target.parent.replaceChild(
             target.currentCanvas,
             target.stagedCanvas
           );
         }
+        if (target.currentCanvas === void 0) {
+          view.canvases.delete(target.decoded.manifest.clip_id);
+        } else {
+          view.canvases.set(
+            target.decoded.manifest.clip_id,
+            target.currentCanvas
+          );
+        }
       }
       throw error;
-    }
-    for (const target of targets) {
-      view.canvases.set(
-        target.decoded.manifest.clip_id,
-        target.stagedCanvas
-      );
     }
     return true;
   } finally {
     for (const frame of decoded) {
-      frame.bitmap.close();
+      if (!frame.closed) {
+        frame.closed = true;
+        frame.bitmap.close();
+      }
     }
   }
 }
@@ -820,6 +1484,9 @@ var PausedSeekScheduler = class {
     this.schedule = options.schedule ?? scheduleFrame;
     this.cancel = options.cancel ?? cancelFrame;
   }
+  get generation() {
+    return Math.max(0, this.nextGeneration - 1);
+  }
   clamp(frame) {
     if (!Number.isFinite(frame)) {
       return frame < 0 ? 0 : this.numFrames - 1;
@@ -869,6 +1536,14 @@ var PausedSeekScheduler = class {
     }
     return this.sendRequest(frame, generation, "playback");
   }
+  requestView(frame, clipIds, announce) {
+    this.cancelScheduledScrub();
+    const generation = this.nextGeneration;
+    this.nextGeneration += 1;
+    this.clipIds = [...clipIds];
+    announce(generation);
+    return this.sendRequest(frame, generation, "seek");
+  }
   scheduleScrub(frame) {
     this.pendingFrame = this.clamp(frame);
     if (!this.closed && this.scheduledHandle === void 0) {
@@ -901,6 +1576,7 @@ function createStatus(text) {
   status.textContent = text;
   return status;
 }
+var MAX_ACTIVE_DECODE_SETS = 2;
 var WEBP_DECODE_PROBE = new Uint8Array([
   82,
   73,
@@ -963,18 +1639,46 @@ function render({ model, el, signal }) {
     return;
   }
   let metadata;
+  let comparisonState;
   let playerView;
   let seekScheduler;
   let playbackController;
   let currentRequest;
+  let unacknowledgedDelivery;
+  let lastAcknowledgedRequestId = -1;
+  let activeDecodeSets = 0;
+  let deferredDecodeRetry;
   let resumeAfterPaint;
   let resumeAfterScrub = false;
   let autoplayPending = false;
   let resumeAfterVisibility = false;
+  let comparisonFramePending = false;
+  let comparisonFrameRequired = false;
+  const requestsMatch = (left, right) => left !== void 0 && right !== void 0 && left.request_id === right.request_id && left.generation === right.generation && left.frame === right.frame;
   const updateStatus = (text) => {
     const liveStatus = el.querySelector("[role='status']");
     if (liveStatus !== null) {
       liveStatus.textContent = text;
+    }
+  };
+  const setCurrentRequest = (request) => {
+    if (unacknowledgedDelivery !== void 0 && (request === void 0 || request.request_id !== unacknowledgedDelivery.requestId || request.generation !== unacknowledgedDelivery.generation)) {
+      unacknowledgedDelivery.acknowledgeStale();
+    }
+    if (deferredDecodeRetry !== void 0 && !requestsMatch(request, deferredDecodeRetry.expected)) {
+      deferredDecodeRetry = void 0;
+    }
+    currentRequest = request;
+  };
+  const retryDeferredDecode = () => {
+    const deferred = deferredDecodeRetry;
+    if (deferred === void 0 || activeDecodeSets >= MAX_ACTIVE_DECODE_SETS || !requestsMatch(currentRequest, deferred.expected) || seekScheduler === void 0 || signal.aborted) {
+      return;
+    }
+    deferredDecodeRetry = void 0;
+    const request = seekScheduler.requestExact(deferred.expected.frame);
+    if (deferred.resume) {
+      resumeAfterPaint = request;
     }
   };
   const playWhenVisible = () => {
@@ -1001,12 +1705,16 @@ function render({ model, el, signal }) {
       if (message.type === "metadata") {
         if ("clips" in message) {
           metadata = message;
+          comparisonState = createComparisonState(message);
           seekScheduler = new PausedSeekScheduler({
             sessionId,
             numFrames: message.num_frames,
             clipIds: message.active_clip_ids,
             send: (request) => {
-              currentRequest = request;
+              setCurrentRequest(request);
+              if (comparisonFrameRequired) {
+                comparisonFramePending = true;
+              }
               model.send(request);
             }
           });
@@ -1034,8 +1742,76 @@ function render({ model, el, signal }) {
                 }
                 resumeAfterPaint = void 0;
                 playbackController?.pause(false);
-                currentRequest = void 0;
+                setCurrentRequest(void 0);
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
+              },
+              changeComparison: (transition) => {
+                if (metadata === void 0 || comparisonState === void 0 || seekScheduler === void 0) {
+                  return;
+                }
+                const previous = comparisonState;
+                let next;
+                try {
+                  next = transitionComparisonState(
+                    previous,
+                    metadata,
+                    transition
+                  );
+                } catch (error) {
+                  updateStatus(
+                    error instanceof Error ? error.message : "Invalid comparison selection."
+                  );
+                  playerView?.setComparison(previous);
+                  return;
+                }
+                comparisonState = next.state;
+                metadata = {
+                  ...metadata,
+                  mode: next.state.mode,
+                  active_clip_ids: [...next.state.activeClipIds]
+                };
+                const deferComposition = next.requiresFrameSet || comparisonFrameRequired;
+                playerView?.setComparison(next.state, deferComposition);
+                const needsFrameSet = next.requiresFrameSet || comparisonFrameRequired && !comparisonFramePending;
+                const durableViewChanged = previous.mode !== next.state.mode || previous.overlayOpacity !== next.state.overlayOpacity || needsFrameSet;
+                if (!durableViewChanged) {
+                  return;
+                }
+                if (!needsFrameSet) {
+                  model.send(
+                    createSetViewMessage(
+                      sessionId,
+                      seekScheduler.generation,
+                      next.state.mode,
+                      next.state.activeClipIds,
+                      next.state.overlayOpacity
+                    )
+                  );
+                  return;
+                }
+                const shouldResume = playbackController?.playing === true || resumeAfterPaint !== void 0 || resumeAfterScrub || deferredDecodeRetry?.resume === true;
+                const frame = playbackController?.playing === true ? playbackController.pause(false) : playerView?.getFrame() ?? 0;
+                setCurrentRequest(void 0);
+                resumeAfterPaint = void 0;
+                resumeAfterScrub = false;
+                const request = seekScheduler.requestView(
+                  frame,
+                  next.state.activeClipIds,
+                  (generation) => model.send(
+                    createSetViewMessage(
+                      sessionId,
+                      generation,
+                      next.state.mode,
+                      next.state.activeClipIds,
+                      next.state.overlayOpacity
+                    )
+                  )
+                );
+                comparisonFrameRequired = true;
+                comparisonFramePending = true;
+                if (shouldResume) {
+                  resumeAfterPaint = request;
+                }
               },
               togglePlaying
             },
@@ -1064,13 +1840,39 @@ function render({ model, el, signal }) {
             "Frame payload arrived before preview metadata."
           );
         }
+        if (message.request_id <= lastAcknowledgedRequestId) {
+          return;
+        }
+        if (unacknowledgedDelivery !== void 0) {
+          if (unacknowledgedDelivery.requestId === message.request_id && unacknowledgedDelivery.generation === message.generation) {
+            return;
+          }
+          throw new ProtocolError(
+            "invalid_message",
+            "A frame payload arrived before the previous delivery was acknowledged."
+          );
+        }
         const expected = currentRequest;
-        const expectedClipIds = metadata.active_clip_ids;
+        const expectedClipIds = comparisonState?.activeClipIds ?? metadata.active_clip_ids;
         const manifestClipIds = message.frames.map((frame) => frame.clip_id);
-        const isCurrent = () => !signal.aborted && expected !== void 0 && currentRequest === expected && message.request_id === expected.request_id && message.generation === expected.generation && message.frame === expected.frame && manifestClipIds.length === expectedClipIds.length && manifestClipIds.every(
+        const isCurrent = () => !signal.aborted && expected !== void 0 && requestsMatch(currentRequest, expected) && message.request_id === expected.request_id && message.generation === expected.generation && message.frame === expected.frame && manifestClipIds.length === expectedClipIds.length && manifestClipIds.every(
           (clipId, index) => clipId === expectedClipIds[index]
         );
         const acknowledge = (outcome) => {
+          if (acknowledged) {
+            return;
+          }
+          acknowledged = true;
+          lastAcknowledgedRequestId = Math.max(
+            lastAcknowledgedRequestId,
+            message.request_id
+          );
+          if (outcome !== "painted") {
+            deliveryController.abort();
+          }
+          if (unacknowledgedDelivery?.requestId === message.request_id && unacknowledgedDelivery.generation === message.generation) {
+            unacknowledgedDelivery = void 0;
+          }
           model.send(
             createFrameSetAck(
               sessionId,
@@ -1080,10 +1882,35 @@ function render({ model, el, signal }) {
             )
           );
         };
+        let acknowledged = false;
+        const deliveryController = new AbortController();
+        unacknowledgedDelivery = {
+          requestId: message.request_id,
+          generation: message.generation,
+          acknowledgeStale: () => acknowledge("stale")
+        };
         if (!isCurrent()) {
           acknowledge("stale");
           return;
         }
+        if (activeDecodeSets >= MAX_ACTIVE_DECODE_SETS) {
+          const resume = resumeAfterPaint !== void 0 && resumeAfterPaint.request_id === message.request_id && resumeAfterPaint.generation === message.generation;
+          if (resume) {
+            resumeAfterPaint = void 0;
+          }
+          deferredDecodeRetry = {
+            expected: {
+              request_id: message.request_id,
+              generation: message.generation,
+              frame: message.frame
+            },
+            resume
+          };
+          comparisonFramePending = false;
+          acknowledge("stale");
+          return;
+        }
+        activeDecodeSets += 1;
         let painted;
         try {
           validateFrameSetBuffers(message, buffers);
@@ -1091,7 +1918,8 @@ function render({ model, el, signal }) {
             playerView,
             message,
             buffers,
-            isCurrent
+            isCurrent,
+            deliveryController.signal
           );
         } catch (error) {
           if (!isCurrent()) {
@@ -1099,10 +1927,18 @@ function render({ model, el, signal }) {
             return;
           }
           acknowledge("decode_error");
+          comparisonFramePending = false;
+          resumeAfterPaint = void 0;
+          setCurrentRequest(void 0);
           playbackController?.pause(false);
           throw error;
+        } finally {
+          activeDecodeSets -= 1;
+          retryDeferredDecode();
         }
         if (painted) {
+          comparisonFramePending = false;
+          comparisonFrameRequired = false;
           playbackController?.setCurrentFrame(message.frame);
           updateStatus(`Frame ${message.frame} ready.`);
           acknowledge("painted");
@@ -1126,6 +1962,11 @@ function render({ model, el, signal }) {
       if (message.request_id !== void 0 && (currentRequest === void 0 || message.request_id !== currentRequest.request_id || message.generation !== currentRequest.generation)) {
         return;
       }
+      if (message.request_id !== void 0) {
+        comparisonFramePending = false;
+        resumeAfterPaint = void 0;
+        setCurrentRequest(void 0);
+      }
       const clip = metadata?.clips.find(
         (candidate) => candidate.id === message.clip_id
       );
@@ -1146,7 +1987,7 @@ function render({ model, el, signal }) {
       if (playbackController?.playing) {
         const pausedFrame = playbackController.pause(false);
         resumeAfterVisibility = metadata !== void 0 && pausedFrame < metadata.num_frames - 1;
-        currentRequest = void 0;
+        setCurrentRequest(void 0);
       }
     } else if (resumeAfterVisibility) {
       playWhenVisible();
@@ -1158,6 +1999,8 @@ function render({ model, el, signal }) {
   signal.addEventListener(
     "abort",
     () => {
+      deferredDecodeRetry = void 0;
+      setCurrentRequest(void 0);
       playbackController?.close();
       seekScheduler?.close();
       model.off("msg:custom", onMessage);

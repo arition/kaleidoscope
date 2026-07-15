@@ -593,6 +593,147 @@ def test_ack_window_drops_completed_pending_set_when_newer_request_starts() -> N
     assert [message["frame"] for message, _ in sent] == [0, 2]
 
 
+def test_generation_advance_retires_old_delivery_before_replacement_request() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    session.advance_generation(1)
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=1,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    assert [message["frame"] for message, _ in sent] == [0]
+    assert (
+        session.ack_frame_set(
+            request_id=0,
+            generation=0,
+            outcome="stale",
+        )
+        == 0
+    )
+    assert [message["frame"] for message, _ in sent] == [0, 1]
+    assert (
+        session.ack_frame_set(
+            request_id=1,
+            generation=1,
+            outcome="painted",
+        )
+        == 1
+    )
+
+
+def test_generation_advance_discards_old_pending_but_preserves_delivery() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=0,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    session.advance_generation(1)
+    node.future = Future()
+    session.request_frame_set(
+        request_id=2,
+        generation=1,
+        frame=2,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    assert [message["frame"] for message, _ in sent] == [0]
+    session.ack_frame_set(request_id=0, generation=0, outcome="stale")
+    assert [message["frame"] for message, _ in sent] == [0, 2]
+
+
+def test_mismatched_old_ack_does_not_clear_newer_delivery() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+    session.ack_frame_set(request_id=0, generation=0, outcome="painted")
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=1,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    with pytest.raises(ValueError, match="does not match"):
+        session.ack_frame_set(request_id=0, generation=0, outcome="stale")
+
+    assert (
+        session.ack_frame_set(
+            request_id=1,
+            generation=1,
+            outcome="painted",
+        )
+        == 1
+    )
+
+
 def test_decode_error_ack_clears_pending_delivery() -> None:
     node = FakeVideoNode()
     sent: list[tuple[dict[str, object], list[bytes]]] = []

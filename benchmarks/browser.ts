@@ -68,6 +68,7 @@ function createMetadata(fixture: BrowserFixture): PreviewMetadataMessage {
     fps_den: 1,
     mode: clipIds.length === 1 ? "single" : "side-by-side",
     active_clip_ids: clipIds,
+    overlay_opacity: 0.5,
     max_visible_clips: 4,
     autoplay: false,
     clips: clipIds.map((clipId: ClipId) => ({

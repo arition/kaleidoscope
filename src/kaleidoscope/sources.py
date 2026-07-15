@@ -25,6 +25,10 @@ type ResolvedMode = Literal[
     "overlay",
     "difference",
 ]
+type ClipWarningCode = Literal[
+    "automatic_rgb24_conversion",
+    "assumed_color_metadata",
+]
 type ColorFamily = Literal["gray", "rgb", "yuv"]
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +41,7 @@ _MATRIX_BT709 = 1
 _TRANSFER_BT709 = 1
 _RANGE_LIMITED = 0
 _RANGE_FULL = 1
+_MAX_SAFE_INTEGER = 2**53 - 1
 
 
 class KaleidoscopeError(ValueError):
@@ -55,7 +60,7 @@ class ColorMetadata:
 
 @dataclass(frozen=True, slots=True)
 class ClipWarning:
-    code: str
+    code: ClipWarningCode
     message: str
 
 
@@ -170,9 +175,11 @@ def _vapoursynth_color_family(value: object, vapoursynth: Any) -> ColorFamily:
 
 
 def _is_clip_id(value: object) -> bool:
-    return (isinstance(value, int) and not isinstance(value, bool)) or (
-        isinstance(value, str) and bool(value)
-    )
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and -_MAX_SAFE_INTEGER <= value <= _MAX_SAFE_INTEGER
+    ) or (isinstance(value, str) and bool(value))
 
 
 def _normalize_inputs(
@@ -205,7 +212,7 @@ def _normalize_inputs(
             if not _is_clip_id(clip_id):
                 raise KaleidoscopeError(
                     "invalid_clip",
-                    "Clip IDs must be non-empty strings or integers.",
+                    "Clip ID values must be non-empty strings or safe integers.",
                 )
             if clip_id in seen_ids:
                 raise KaleidoscopeError(
@@ -431,6 +438,11 @@ def _resolve_id(
     fallback: ClipId,
 ) -> ClipId:
     resolved = fallback if value is None else value
+    if not _is_clip_id(resolved):
+        raise KaleidoscopeError(
+            "invalid_clip",
+            "Clip ID values must be non-empty strings or safe integers.",
+        )
     if resolved not in clip_ids:
         raise KaleidoscopeError(
             "invalid_clip",
@@ -465,6 +477,11 @@ def _resolve_selection(
                 raise KaleidoscopeError(
                     "comparison_unsupported",
                     "Side-by-side mode requires at least one visible clip.",
+                )
+            if not all(_is_clip_id(clip_id) for clip_id in active):
+                raise KaleidoscopeError(
+                    "invalid_clip",
+                    "Clip ID values must be non-empty strings or safe integers.",
                 )
             if len(set(active)) != len(active):
                 raise KaleidoscopeError(
@@ -541,7 +558,11 @@ def build_preview_config(
             "too_many_visible_clips",
             "max_visible_clips must be between 1 and 4.",
         )
-    if not isinstance(overlay_opacity, int | float) or not 0 <= overlay_opacity <= 1:
+    if (
+        not isinstance(overlay_opacity, int | float)
+        or isinstance(overlay_opacity, bool)
+        or not 0 <= overlay_opacity <= 1
+    ):
         raise KaleidoscopeError(
             "comparison_unsupported",
             "overlay_opacity must be between 0 and 1.",

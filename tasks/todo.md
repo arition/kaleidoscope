@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T8 complete; T9 is next
+Status: G1 approved; T9 complete; T10 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.5 approved
 
@@ -73,11 +73,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Enforce fair global in-flight and one-set ACK delivery bounds.
   - [x] Add bounded per-session count/byte LRU behavior.
 
-- [ ] **T9 - Interactive comparison modes** (depends on T7; coordinate with T8)
-  - [ ] Add single and one-to-four side-by-side selectors.
-  - [ ] Add distinct A/B selection for aligned pair modes.
-  - [ ] Implement wipe, opacity overlay, and 8-bit visual difference.
-  - [ ] Prove pair-mode switches reuse decoded images without rerendering.
+- [x] **T9 - Interactive comparison modes** (depends on T7; coordinate with T8)
+  - [x] Add single and one-to-four side-by-side selectors.
+  - [x] Add distinct A/B selection for aligned pair modes.
+  - [x] Implement wipe, opacity overlay, and 8-bit visual difference.
+  - [x] Prove pair-mode switches reuse decoded images without rerendering.
 
 - [ ] **T10 - Recoverable errors and complete lifecycle** (depends on T8 and T9)
   - [ ] Preserve the last complete set on clip-specific failures.

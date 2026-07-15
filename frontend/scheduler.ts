@@ -225,7 +225,7 @@ const cancelFrame = (handle: number): void => {
 export class PausedSeekScheduler {
   private readonly sessionId: string;
   private readonly numFrames: number;
-  private readonly clipIds: ClipId[];
+  private clipIds: ClipId[];
   private readonly send: (message: RequestFrameSetMessage) => void;
   private readonly schedule: (callback: FrameRequestCallback) => number;
   private readonly cancel: (handle: number) => void;
@@ -243,6 +243,10 @@ export class PausedSeekScheduler {
     this.send = options.send;
     this.schedule = options.schedule ?? scheduleFrame;
     this.cancel = options.cancel ?? cancelFrame;
+  }
+
+  get generation(): number {
+    return Math.max(0, this.nextGeneration - 1);
   }
 
   private clamp(frame: number): number {
@@ -303,6 +307,19 @@ export class PausedSeekScheduler {
       this.nextGeneration += 1;
     }
     return this.sendRequest(frame, generation, "playback");
+  }
+
+  requestView(
+    frame: number,
+    clipIds: ClipId[],
+    announce: (generation: number) => void,
+  ): FrameRequestIdentity {
+    this.cancelScheduledScrub();
+    const generation = this.nextGeneration;
+    this.nextGeneration += 1;
+    this.clipIds = [...clipIds];
+    announce(generation);
+    return this.sendRequest(frame, generation, "seek");
   }
 
   scheduleScrub(frame: number): number {

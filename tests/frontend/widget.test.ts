@@ -143,6 +143,7 @@ describe("widget render", () => {
       fps_den: 1,
       mode: "single",
       active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -172,5 +173,102 @@ describe("widget render", () => {
         message.type === "request_frame_set",
     );
     expect(requests).toHaveLength(1);
+  });
+
+  it("stale-acks an in-flight decode when the view is aborted", async () => {
+    let resolveDecode: (bitmap: ImageBitmap) => void = () => {};
+    const close = vi.fn();
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ close: vi.fn() } as unknown as ImageBitmap)
+        .mockReturnValueOnce(
+          new Promise<ImageBitmap>((resolve) => {
+            resolveDecode = resolve;
+          }),
+        ),
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 1,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 1,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+    model.emit(
+      {
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 0,
+        generation: 0,
+        frame: 0,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: 1,
+            render_ms: 1,
+            encode_ms: 1,
+          },
+        ],
+      },
+      [new DataView(new Uint8Array([1]).buffer)],
+    );
+
+    controller.abort();
+
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "ack_frame_set",
+      session_id: "session-1",
+      request_id: 0,
+      generation: 0,
+      outcome: "stale",
+    });
+    resolveDecode({ close } as unknown as ImageBitmap);
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "ack_frame_set" &&
+          "request_id" in message &&
+          message.request_id === 0,
+      ),
+    ).toHaveLength(1);
   });
 });

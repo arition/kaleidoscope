@@ -13,6 +13,7 @@ const metadata = (autoplay: boolean) => ({
   fps_den: 1,
   mode: "single",
   active_clip_ids: ["Source"],
+  overlay_opacity: 0.5,
   max_visible_clips: 4,
   autoplay,
   clips: [

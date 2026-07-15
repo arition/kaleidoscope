@@ -139,6 +139,7 @@ def test_preview_builds_widget_with_stable_metadata(monkeypatch: Any) -> None:
             "fps_den": 1001,
             "mode": "side-by-side",
             "active_clip_ids": ["Source", "Filtered"],
+            "overlay_opacity": 0.5,
             "max_visible_clips": 4,
             "autoplay": False,
             "clips": [

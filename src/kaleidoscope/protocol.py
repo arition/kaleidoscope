@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from math import isfinite
-from typing import Literal, NotRequired, TypedDict, TypeGuard, cast
+from typing import Literal, NotRequired, TypedDict, TypeGuard, cast, overload
 
-from .sources import ClipId
+from .sources import ClipId, ClipWarningCode, ResolvedMode
 
 PROTOCOL_VERSION: Literal[1] = 1
 MAX_FRAME_BUFFER_BYTES = 16 * 1024 * 1024
@@ -50,8 +50,22 @@ class SetPlayingMessage(TypedDict):
     playing: bool
 
 
+class SetViewMessage(TypedDict):
+    protocol: Literal[1]
+    type: Literal["set_view"]
+    session_id: str
+    generation: int
+    mode: ResolvedMode
+    clip_ids: list[ClipId]
+    overlay_opacity: float
+
+
 type FrontendMessage = (
-    ReadyMessage | RequestFrameSetMessage | AckFrameSetMessage | SetPlayingMessage
+    ReadyMessage
+    | RequestFrameSetMessage
+    | AckFrameSetMessage
+    | SetPlayingMessage
+    | SetViewMessage
 )
 
 
@@ -60,13 +74,38 @@ class MetadataMessage(TypedDict):
     type: Literal["metadata"]
     session_id: str
     status: Literal["initialized"]
-    num_frames: NotRequired[int]
-    fps_num: NotRequired[int]
-    fps_den: NotRequired[int]
-    mode: NotRequired[str]
-    active_clip_ids: NotRequired[list[int | str]]
-    max_visible_clips: NotRequired[int]
-    clips: NotRequired[list[dict[str, object]]]
+
+
+class ClipWarningMetadata(TypedDict):
+    code: ClipWarningCode
+    message: str
+
+
+class ClipMetadata(TypedDict):
+    id: ClipId
+    label: str
+    source_format: str
+    source_width: int
+    source_height: int
+    output_width: int
+    output_height: int
+    warnings: list[ClipWarningMetadata]
+
+
+class PreviewMetadataPayload(TypedDict):
+    num_frames: int
+    fps_num: int
+    fps_den: int
+    mode: ResolvedMode
+    active_clip_ids: list[ClipId]
+    overlay_opacity: float
+    max_visible_clips: int
+    autoplay: bool
+    clips: list[ClipMetadata]
+
+
+class PreviewMetadataMessage(MetadataMessage, PreviewMetadataPayload):
+    pass
 
 
 class ErrorMessage(TypedDict):
@@ -124,18 +163,19 @@ def _is_nonnegative_int(value: object) -> TypeGuard[int]:
 
 
 def _is_nonnegative_number(value: object) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and isfinite(value)
-        and value >= 0
-    )
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value <= 10**308
+    return isinstance(value, float) and isfinite(value) and value >= 0
 
 
 def _is_clip_id(value: object) -> TypeGuard[ClipId]:
-    return (isinstance(value, int) and not isinstance(value, bool)) or (
-        isinstance(value, str) and bool(value)
-    )
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and -(2**53 - 1) <= value <= 2**53 - 1
+    ) or (isinstance(value, str) and bool(value))
 
 
 def parse_frontend_message(value: object) -> FrontendMessage:
@@ -166,6 +206,7 @@ def parse_frontend_message(value: object) -> FrontendMessage:
 
     if value.get("type") == "request_frame_set":
         clip_ids = value.get("clip_ids")
+        reason = value.get("reason")
         if (
             not _is_nonnegative_int(value.get("request_id"))
             or not _is_nonnegative_int(value.get("generation"))
@@ -174,16 +215,19 @@ def parse_frontend_message(value: object) -> FrontendMessage:
             or not 1 <= len(clip_ids) <= 4
             or not all(_is_clip_id(clip_id) for clip_id in clip_ids)
             or len(set(clip_ids)) != len(clip_ids)
-            or value.get("reason") not in {"seek", "playback", "prefetch"}
+            or not isinstance(reason, str)
+            or reason not in {"seek", "playback", "prefetch"}
         ):
             raise ProtocolError("invalid_message", "Malformed frame-set request.")
         return cast(RequestFrameSetMessage, value)
 
     if value.get("type") == "ack_frame_set":
+        outcome = value.get("outcome")
         if (
             not _is_nonnegative_int(value.get("request_id"))
             or not _is_nonnegative_int(value.get("generation"))
-            or value.get("outcome") not in {"painted", "stale", "decode_error"}
+            or not isinstance(outcome, str)
+            or outcome not in {"painted", "stale", "decode_error"}
         ):
             raise ProtocolError("invalid_message", "Malformed frame-set ACK.")
         return cast(AckFrameSetMessage, value)
@@ -192,6 +236,36 @@ def parse_frontend_message(value: object) -> FrontendMessage:
         if not isinstance(value.get("playing"), bool):
             raise ProtocolError("invalid_message", "Malformed playing state.")
         return cast(SetPlayingMessage, value)
+
+    if value.get("type") == "set_view":
+        clip_ids = value.get("clip_ids")
+        mode = value.get("mode")
+        overlay_opacity = value.get("overlay_opacity")
+        valid_cardinality = (
+            (mode == "single" and isinstance(clip_ids, list) and len(clip_ids) == 1)
+            or (
+                mode == "side-by-side"
+                and isinstance(clip_ids, list)
+                and 1 <= len(clip_ids) <= 4
+            )
+            or (
+                isinstance(mode, str)
+                and mode in {"wipe", "overlay", "difference"}
+                and isinstance(clip_ids, list)
+                and len(clip_ids) == 2
+            )
+        )
+        if (
+            not _is_nonnegative_int(value.get("generation"))
+            or not isinstance(clip_ids, list)
+            or not valid_cardinality
+            or not all(_is_clip_id(clip_id) for clip_id in clip_ids)
+            or len(set(clip_ids)) != len(clip_ids)
+            or not _is_nonnegative_number(overlay_opacity)
+            or cast(float, overlay_opacity) > 1
+        ):
+            raise ProtocolError("invalid_message", "Malformed comparison view.")
+        return cast(SetViewMessage, value)
 
     raise ProtocolError("invalid_message", "Unsupported frontend message type.")
 
@@ -263,19 +337,33 @@ def runtime_error_message(
     return cast(dict[str, object], error)
 
 
+@overload
+def metadata_message(session_id: str, payload: None = None) -> MetadataMessage: ...
+
+
+@overload
 def metadata_message(
     session_id: str,
-    payload: Mapping[str, object] | None = None,
-) -> MetadataMessage:
-    message: dict[str, object] = {
+    payload: PreviewMetadataPayload,
+) -> PreviewMetadataMessage: ...
+
+
+def metadata_message(
+    session_id: str,
+    payload: PreviewMetadataPayload | None = None,
+) -> MetadataMessage | PreviewMetadataMessage:
+    message: MetadataMessage = {
         "protocol": PROTOCOL_VERSION,
         "type": "metadata",
         "session_id": session_id,
         "status": "initialized",
     }
-    if payload is not None:
-        message.update(payload)
-    return cast(MetadataMessage, message)
+    if payload is None:
+        return message
+    return {
+        **message,
+        **payload,
+    }
 
 
 def error_message(session_id: str, error: ProtocolError) -> ErrorMessage:

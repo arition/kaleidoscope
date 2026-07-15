@@ -98,6 +98,25 @@ class PreviewSession:
                 self._cache.clear()
             self._scheduler.close()
 
+    def _advance_generation_locked(self, generation: int) -> None:
+        if self._current_request is not None:
+            self._current_request.completed.clear()
+            self._current_request = None
+        self._pending_delivery = None
+        self._last_generation = generation
+
+    def advance_generation(self, generation: int) -> None:
+        with self._delivery_lock:
+            with self._lock:
+                if self._closed:
+                    return
+                if generation < self._last_generation:
+                    raise ValueError("Generations must not decrease.")
+                if generation == self._last_generation:
+                    return
+                self._advance_generation_locked(generation)
+            self._scheduler.replace_pending(())
+
     def ack_frame_set(
         self,
         *,
@@ -272,8 +291,9 @@ class PreviewSession:
                         "Request IDs must increase monotonically and generations "
                         "must not decrease."
                     )
+                if generation > self._last_generation:
+                    self._advance_generation_locked(generation)
                 self._last_request_id = request_id
-                self._last_generation = generation
                 if self._current_request is not None:
                     self._current_request.completed.clear()
                 self._pending_delivery = None

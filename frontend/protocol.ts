@@ -43,6 +43,16 @@ export interface SetPlayingMessage {
   playing: boolean;
 }
 
+export interface SetViewMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "set_view";
+  session_id: string;
+  generation: number;
+  mode: ComparisonMode;
+  clip_ids: ClipId[];
+  overlay_opacity: number;
+}
+
 export interface MetadataMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "metadata";
@@ -85,6 +95,7 @@ export interface PreviewMetadataMessage extends MetadataMessage {
   fps_den: number;
   mode: ComparisonMode;
   active_clip_ids: ClipId[];
+  overlay_opacity: number;
   max_visible_clips: number;
   autoplay: boolean;
   clips: ClipMetadata[];
@@ -158,7 +169,7 @@ function isNonnegativeFiniteNumber(value: unknown): value is number {
 
 function isClipId(value: unknown): value is ClipId {
   return (
-    (Number.isInteger(value) && typeof value === "number") ||
+    (Number.isSafeInteger(value) && typeof value === "number") ||
     (typeof value === "string" && value.length > 0)
   );
 }
@@ -254,6 +265,7 @@ function hasPreviewMetadataFields(value: Record<string, unknown>): boolean {
     "fps_den",
     "mode",
     "active_clip_ids",
+    "overlay_opacity",
     "max_visible_clips",
     "autoplay",
     "clips",
@@ -274,6 +286,8 @@ function isPreviewMetadataMessage(
     !Array.isArray(value.active_clip_ids) ||
     value.active_clip_ids.length === 0 ||
     !value.active_clip_ids.every(isClipId) ||
+    !isNonnegativeFiniteNumber(value.overlay_opacity) ||
+    value.overlay_opacity > 1 ||
     !Array.isArray(value.clips) ||
     value.clips.length === 0 ||
     !value.clips.every(isClipMetadata)
@@ -281,13 +295,34 @@ function isPreviewMetadataMessage(
     return false;
   }
 
-  const clipIds = value.clips.map((clip) => clip.id);
+  const clips = value.clips as ClipMetadata[];
+  const clipIds = clips.map((clip) => clip.id);
   const activeIds = value.active_clip_ids;
+  const activeClips = activeIds.map((activeId) =>
+    clips.find((clip) => clip.id === activeId),
+  );
+  const validCardinality =
+    (value.mode === "single" && activeIds.length === 1) ||
+    (value.mode === "side-by-side" && activeIds.length >= 1) ||
+    ((value.mode === "wipe" ||
+      value.mode === "overlay" ||
+      value.mode === "difference") &&
+      activeIds.length === 2);
+  const validAlignedGeometry =
+    value.mode === "single" ||
+    value.mode === "side-by-side" ||
+    (activeClips.length === 2 &&
+      activeClips[0] !== undefined &&
+      activeClips[1] !== undefined &&
+      activeClips[0].source_width === activeClips[1].source_width &&
+      activeClips[0].source_height === activeClips[1].source_height);
   return (
     new Set(clipIds).size === clipIds.length &&
     new Set(activeIds).size === activeIds.length &&
     activeIds.length <= value.max_visible_clips &&
-    activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId))
+    activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId)) &&
+    validCardinality &&
+    validAlignedGeometry
   );
 }
 
@@ -336,6 +371,24 @@ export function createFrameSetAck(
     request_id: requestId,
     generation,
     outcome,
+  };
+}
+
+export function createSetViewMessage(
+  sessionId: string,
+  generation: number,
+  mode: ComparisonMode,
+  clipIds: ClipId[],
+  overlayOpacity: number,
+): SetViewMessage {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "set_view",
+    session_id: sessionId,
+    generation,
+    mode,
+    clip_ids: [...clipIds],
+    overlay_opacity: overlayOpacity,
   };
 }
 

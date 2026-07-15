@@ -161,6 +161,35 @@ describe("PausedSeekScheduler", () => {
     ]);
   });
 
+  it("announces a new active clip set before requesting its current frame", () => {
+    const order: unknown[] = [];
+    const scheduler = new PausedSeekScheduler({
+      sessionId: "session-1",
+      numFrames: 100,
+      clipIds: ["Source", "Filtered"],
+      send: (message) => order.push(message),
+    });
+
+    scheduler.requestExact(0);
+    const request = scheduler.requestView(
+      7,
+      ["Source", "Reference"],
+      (generation) => order.push({ type: "set_view", generation }),
+    );
+
+    expect(request).toEqual({ request_id: 1, generation: 1, frame: 7 });
+    expect(order).toMatchObject([
+      { type: "request_frame_set", generation: 0, clip_ids: ["Source", "Filtered"] },
+      { type: "set_view", generation: 1 },
+      {
+        type: "request_frame_set",
+        generation: 1,
+        frame: 7,
+        clip_ids: ["Source", "Reference"],
+      },
+    ]);
+  });
+
   it("cancels queued and future requests when the view closes", () => {
     let scheduled: FrameRequestCallback | undefined;
     const cancel = vi.fn();

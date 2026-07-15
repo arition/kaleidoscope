@@ -13,6 +13,10 @@ class FakeSession:
         self.closed = False
         self.requests: list[dict[str, object]] = []
         self.acks: list[dict[str, object]] = []
+        self.generations: list[int] = []
+
+    def advance_generation(self, generation: int) -> None:
+        self.generations.append(generation)
 
     def request_frame_set(self, **request: object) -> None:
         self.requests.append(request)
@@ -23,6 +27,13 @@ class FakeSession:
 
     def close(self) -> None:
         self.closed = True
+
+
+class ViewClip:
+    def __init__(self, clip_id: str, width: int = 1, height: int = 1) -> None:
+        self.id = clip_id
+        self.source_width = width
+        self.source_height = height
 
 
 def make_config(codec: str = "jpeg") -> object:
@@ -117,6 +128,7 @@ def test_widget_metadata_includes_autoplay(monkeypatch: Any) -> None:
             "codec": "jpeg",
             "mode": "single",
             "active_clip_ids": ("Source",),
+            "overlay_opacity": 0.3,
             "num_frames": 10,
             "fps": Fraction(24, 1),
             "max_visible_clips": 4,
@@ -144,6 +156,7 @@ def test_widget_metadata_includes_autoplay(monkeypatch: Any) -> None:
     )
 
     assert sent[0]["autoplay"] is True
+    assert sent[0]["overlay_opacity"] == 0.3
 
 
 def test_widget_routes_ack_and_updates_durable_playback_traits(
@@ -188,6 +201,401 @@ def test_widget_routes_ack_and_updates_durable_playback_traits(
             "outcome": "painted",
         }
     ]
+
+
+def test_widget_applies_view_before_accepting_matching_frame_request() -> None:
+    session = FakeSession()
+    config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("Source"), ViewClip("Filtered"), ViewClip("Reference")),
+            "max_visible_clips": 4,
+        },
+    )()
+    widget = PreviewWidget(session_id="session-1")
+    widget._config = config
+    widget._session = session
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "wipe",
+            "clip_ids": ["Source", "Reference"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 1,
+            "generation": 1,
+            "frame": 7,
+            "clip_ids": ["Source", "Reference"],
+            "reason": "seek",
+        },
+        [],
+    )
+
+    assert widget.mode == "wipe"
+    assert widget.active_clip_ids == ["Source", "Reference"]
+    assert session.generations == [1]
+    assert session.requests == [
+        {
+            "request_id": 1,
+            "generation": 1,
+            "frame": 7,
+            "clip_ids": ["Source", "Reference"],
+        }
+    ]
+
+
+def test_widget_rejects_request_older_than_the_accepted_view(
+    monkeypatch: Any,
+) -> None:
+    sent: list[dict[str, object]] = []
+    session = FakeSession()
+    config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("Source"), ViewClip("Filtered")),
+            "max_visible_clips": 2,
+        },
+    )()
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget._config = config
+    widget._session = session
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 2,
+            "mode": "single",
+            "clip_ids": ["Filtered"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 1,
+            "generation": 1,
+            "frame": 7,
+            "clip_ids": ["Filtered"],
+            "reason": "seek",
+        },
+        [],
+    )
+
+    assert session.generations == [2]
+    assert session.requests == []
+    assert widget.status == "error"
+    assert sent[-1]["message"] == (
+        "Frame-set request generation is older than the active view."
+    )
+
+
+def test_widget_rejects_view_older_than_the_latest_request(
+    monkeypatch: Any,
+) -> None:
+    sent: list[dict[str, object]] = []
+    session = FakeSession()
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget._view_active_clip_ids = ("Source",)
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 1,
+            "generation": 3,
+            "frame": 7,
+            "clip_ids": ["Source"],
+            "reason": "seek",
+        },
+        [],
+    )
+    widget._config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("Source"), ViewClip("Filtered")),
+            "max_visible_clips": 2,
+        },
+    )()
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 2,
+            "mode": "single",
+            "clip_ids": ["Filtered"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert session.requests == [
+        {
+            "request_id": 1,
+            "generation": 3,
+            "frame": 7,
+            "clip_ids": ["Source"],
+        }
+    ]
+    assert widget.active_clip_ids == []
+    assert widget.status == "error"
+    assert sent[-1]["message"] == (
+        "Comparison view generation is older than the latest request."
+    )
+
+
+def test_widget_rejects_active_view_after_same_generation_request(
+    monkeypatch: Any,
+) -> None:
+    sent: list[dict[str, object]] = []
+    session = FakeSession()
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget._view_active_clip_ids = ("Source",)
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 1,
+            "generation": 3,
+            "frame": 7,
+            "clip_ids": ["Source"],
+            "reason": "seek",
+        },
+        [],
+    )
+    widget._config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("Source"), ViewClip("Filtered")),
+            "max_visible_clips": 2,
+        },
+    )()
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 3,
+            "mode": "single",
+            "clip_ids": ["Filtered"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert sent[-1]["message"] == (
+        "An active comparison view must be announced before its frame request."
+    )
+
+
+def test_widget_accepts_explicit_side_by_side_order() -> None:
+    session = FakeSession()
+    config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("A"), ViewClip("B"), ViewClip("C")),
+            "max_visible_clips": 3,
+        },
+    )()
+    widget = PreviewWidget(session_id="session-1")
+    widget._config = config
+    widget._session = session
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "side-by-side",
+            "clip_ids": ["C", "A"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert widget.status != "error"
+    assert widget.active_clip_ids == ["C", "A"]
+
+
+def test_terminal_view_error_clears_playing_state(monkeypatch: Any) -> None:
+    sent: list[dict[str, object]] = []
+    session = FakeSession()
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget._config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("Source"),),
+            "max_visible_clips": 1,
+        },
+    )()
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget.set_trait("playing", True)
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "single",
+            "clip_ids": ["Missing"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert widget.playing is False
+    assert session.closed is True
+
+
+def test_explicit_close_clears_playing_and_marks_the_widget_closed() -> None:
+    session = FakeSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget.set_trait("status", "ready")
+    widget.set_trait("playing", True)
+
+    widget.close()
+
+    assert widget.status == "closed"
+    assert widget.playing is False
+    assert session.closed is True
+
+
+def test_terminal_widget_suppresses_late_session_delivery(monkeypatch: Any) -> None:
+    sent: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget.close()
+
+    widget._send_session_message(
+        {
+            "protocol": 1,
+            "type": "frame_set",
+            "session_id": "session-1",
+            "request_id": 7,
+            "generation": 2,
+            "frame": 3,
+            "frames": [],
+        },
+        [],
+    )
+
+    assert sent == []
+    assert widget._delivered_frames == {}
+
+
+def test_widget_rejects_view_above_configured_visible_limit(
+    monkeypatch: Any,
+) -> None:
+    sent: list[dict[str, object]] = []
+    session = FakeSession()
+    config = type(
+        "Config",
+        (),
+        {
+            "clips": (ViewClip("A"), ViewClip("B"), ViewClip("C")),
+            "max_visible_clips": 2,
+        },
+    )()
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(session_id="session-1")
+    widget._config = config
+    widget._session = session
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "side-by-side",
+            "clip_ids": ["A", "B", "C"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert session.closed is True
+    assert sent[-1]["code"] == "invalid_message"
 
 
 def test_widget_commits_painted_frame_before_reentrant_delivery(

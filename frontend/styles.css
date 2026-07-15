@@ -60,6 +60,77 @@
   font-variant-numeric: tabular-nums;
 }
 
+.kaleidoscope-comparison-toolbar,
+.kaleidoscope-mode-control,
+.kaleidoscope-selection-control,
+.kaleidoscope-parameter {
+  display: flex;
+  align-items: center;
+}
+
+.kaleidoscope-comparison-toolbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kaleidoscope-mode-control {
+  overflow: hidden;
+  border: 1px solid var(--jp-border-color1, #8a9099);
+  border-radius: 4px;
+}
+
+.kaleidoscope-mode-button {
+  min-height: 2rem;
+  padding: 0 0.625rem;
+  color: var(--jp-ui-font-color1, #202124);
+  background: var(--jp-layout-color1, #ffffff);
+  border: 0;
+  border-right: 1px solid var(--jp-border-color2, #c9ced6);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.kaleidoscope-mode-button:last-child {
+  border-right: 0;
+}
+
+.kaleidoscope-mode-button[aria-pressed="true"] {
+  color: var(--jp-ui-inverse-font-color1, #ffffff);
+  background: var(--jp-brand-color1, #087f8c);
+}
+
+.kaleidoscope-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.kaleidoscope-selection-control {
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.kaleidoscope-clip-select {
+  box-sizing: border-box;
+  min-width: 8rem;
+  height: 2rem;
+  padding: 0 1.75rem 0 0.5rem;
+  color: var(--jp-ui-font-color1, #202124);
+  background: var(--jp-layout-color1, #ffffff);
+  border: 1px solid var(--jp-border-color1, #8a9099);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.kaleidoscope-clip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  font-size: 0.75rem;
+}
+
 .kaleidoscope-control-button,
 .kaleidoscope-frame-input,
 .kaleidoscope-time-input {
@@ -141,6 +212,78 @@
     auto-fit,
     minmax(min(100%, 18rem), 1fr)
   );
+}
+
+.kaleidoscope-comparison {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+}
+
+.kaleidoscope-comparison[hidden] {
+  display: none;
+}
+
+.kaleidoscope-comparison__labels {
+  color: var(--jp-ui-font-color2, #5f6368);
+  font-size: 0.75rem;
+}
+
+.kaleidoscope-comparison__stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #111111;
+}
+
+.kaleidoscope-comparison__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(70vh, 720px);
+  object-fit: contain;
+}
+
+.kaleidoscope-comparison__parameters {
+  min-height: 1.5rem;
+  color: var(--jp-ui-font-color2, #5f6368);
+  font-size: 0.75rem;
+}
+
+.kaleidoscope-parameter {
+  gap: 0.5rem;
+}
+
+.kaleidoscope-parameter input {
+  min-width: 8rem;
+  flex: 1 1 12rem;
+  accent-color: var(--jp-brand-color1, #087f8c);
+}
+
+.kaleidoscope-parameter output {
+  width: 3rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.kaleidoscope-wipe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: ew-resize;
+  opacity: 0.7;
+  accent-color: #ffffff;
+}
+
+.kaleidoscope-mode-button:focus-visible,
+.kaleidoscope-clip-select:focus-visible,
+.kaleidoscope-clip-toggle input:focus-visible,
+.kaleidoscope-wipe:focus-visible,
+.kaleidoscope-parameter input:focus-visible {
+  outline: 2px solid var(--jp-brand-color1, #087f8c);
+  outline-offset: 1px;
 }
 
 .kaleidoscope-clip {

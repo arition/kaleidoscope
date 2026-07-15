@@ -57,6 +57,7 @@ def encode_webp_fixture(name: str, color: list[int]) -> None:
 def main() -> None:
     encode_fixture("frame.jpg", [220, 40, 20])
     encode_fixture("filtered.jpg", [20, 190, 220])
+    encode_fixture("reference.jpg", [40, 210, 60])
     encode_webp_fixture("frame.webp", [220, 40, 20])
 
 

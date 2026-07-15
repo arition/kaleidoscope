@@ -1,6 +1,6 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T7 complete; G1 approved; Tasks T8 and T9 next
+Status: T1-T9 complete; G1 approved; Task T10 is next
 Source: `tasks/spec.md`, revision 0.5 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
@@ -282,20 +282,20 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] `auto`, `single`, and one-to-four-clip side-by-side modes select deterministic defaults and preserve normalized order.
-- [ ] Pair modes enforce distinct A/B clips and identical source geometry.
-- [ ] Wipe uses a draggable and keyboard-operable vertical divider with aligned canvases.
-- [ ] Overlay adjusts B opacity from 0 through 1.
-- [ ] Difference uses documented 8-bit browser compositing and is labeled non-reference.
-- [ ] Switching wipe/overlay/difference for an unchanged pair sends no frame request and performs no re-encode.
-- [ ] Changing active clips increments generation and retires incomplete prior sets.
-- [ ] Clip labels and active conversion warnings remain associated with the correct view.
+- [x] `auto`, `single`, and one-to-four-clip side-by-side modes select deterministic defaults and preserve normalized order.
+- [x] Pair modes enforce distinct A/B clips and identical source geometry.
+- [x] Wipe uses a draggable and keyboard-operable vertical divider with aligned canvases.
+- [x] Overlay adjusts B opacity from 0 through 1.
+- [x] Difference uses documented 8-bit browser compositing and is labeled non-reference.
+- [x] Switching wipe/overlay/difference for an unchanged pair sends no frame request and performs no re-encode.
+- [x] Changing active clips increments generation and retires incomplete prior sets.
+- [x] Clip labels and active conversion warnings remain associated with the correct view.
 
 **Verification:**
 
-- [ ] `hatch run test:pytest tests/python/test_api.py tests/python/test_protocol.py -k "mode or visible or primary or secondary"`
-- [ ] `npm test -- --run tests/frontend/comparison.test.ts tests/frontend/player.test.ts`
-- [ ] `npm run test:e2e -- --grep "single|side-by-side|wipe|overlay|difference"`
+- [x] `hatch run test:pytest tests/python/test_api.py tests/python/test_protocol.py -k "mode or visible or primary or secondary"`
+- [x] `npm test -- --run tests/frontend/comparison.test.ts tests/frontend/player.test.ts`
+- [x] `npm run test:e2e -- --grep "single|side-by-side|wipe|overlay|difference"`
 
 ## T10: Recoverable Errors and Complete Lifecycle
 

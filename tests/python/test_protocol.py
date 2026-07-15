@@ -97,6 +97,24 @@ def test_parse_frontend_message_accepts_playing_state(playing: bool) -> None:
     assert message["playing"] is playing
 
 
+def test_parse_frontend_message_accepts_comparison_view() -> None:
+    message = parse_frontend_message(
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 3,
+            "mode": "overlay",
+            "clip_ids": ["Source", "Filtered"],
+            "overlay_opacity": 0.25,
+        }
+    )
+
+    assert message["type"] == "set_view"
+    assert message["clip_ids"] == ["Source", "Filtered"]
+    assert message["overlay_opacity"] == 0.25
+
+
 def test_frame_set_message_preserves_ordered_buffer_mapping() -> None:
     message = frame_set_message(
         "session-1",
@@ -214,6 +232,26 @@ def test_frame_set_message_rejects_non_deterministic_indices() -> None:
         },
         {
             "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 0,
+            "generation": 0,
+            "frame": 0,
+            "clip_ids": ["Source"],
+            "reason": [],
+        },
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 0,
+            "generation": 0,
+            "frame": 0,
+            "clip_ids": [2**53],
+            "reason": "seek",
+        },
+        {
+            "protocol": 1,
             "type": "ack_frame_set",
             "session_id": "session-1",
             "request_id": 0,
@@ -222,9 +260,53 @@ def test_frame_set_message_rejects_non_deterministic_indices() -> None:
         },
         {
             "protocol": 1,
+            "type": "ack_frame_set",
+            "session_id": "session-1",
+            "request_id": 0,
+            "generation": 0,
+            "outcome": {},
+        },
+        {
+            "protocol": 1,
             "type": "set_playing",
             "session_id": "session-1",
             "playing": 1,
+        },
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "wipe",
+            "clip_ids": ["Source", "Source"],
+            "overlay_opacity": 0.5,
+        },
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": [],
+            "clip_ids": ["Source"],
+            "overlay_opacity": 0.5,
+        },
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "overlay",
+            "clip_ids": ["Source", "Filtered"],
+            "overlay_opacity": 2,
+        },
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "overlay",
+            "clip_ids": ["Source", "Filtered"],
+            "overlay_opacity": 10**1000,
         },
     ],
 )

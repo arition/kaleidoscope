@@ -6,6 +6,7 @@ import {
   createFrameSetAck,
   createReadyMessage,
   createSetPlayingMessage,
+  createSetViewMessage,
   parseBackendMessage,
   validateFrameSetBuffers,
 } from "../../frontend/protocol.js";
@@ -48,6 +49,26 @@ describe("protocol v1", () => {
     });
   });
 
+  it("creates a durable comparison view message", () => {
+    expect(
+      createSetViewMessage(
+        "session-1",
+        3,
+        "overlay",
+        ["Source", "Filtered"],
+        0.25,
+      ),
+    ).toEqual({
+      protocol: 1,
+      type: "set_view",
+      session_id: "session-1",
+      generation: 3,
+      mode: "overlay",
+      clip_ids: ["Source", "Filtered"],
+      overlay_opacity: 0.25,
+    });
+  });
+
   it("accepts initialized metadata", () => {
     expect(
       parseBackendMessage({
@@ -60,6 +81,7 @@ describe("protocol v1", () => {
         fps_den: 1001,
         mode: "side-by-side",
         active_clip_ids: ["Source", "Filtered"],
+        overlay_opacity: 0.5,
         max_visible_clips: 4,
         autoplay: false,
         clips: [
@@ -95,6 +117,7 @@ describe("protocol v1", () => {
       fps_den: 1001,
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -253,6 +276,108 @@ describe("protocol v1", () => {
             output_width: 640,
             output_height: 360,
             warnings: [{ code: "unknown", message: "Unexpected warning." }],
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects metadata whose active set does not match the comparison mode", () => {
+    const clip = {
+      id: "Source",
+      label: "Source",
+      source_format: "RGB24",
+      source_width: 640,
+      source_height: 360,
+      output_width: 640,
+      output_height: 360,
+      warnings: [],
+    };
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 1,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "single",
+        active_clip_ids: ["Source", "Filtered"],
+        overlay_opacity: 0.5,
+        max_visible_clips: 4,
+        autoplay: false,
+        clips: [clip, { ...clip, id: "Filtered", label: "Filtered" }],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects clip IDs outside the JavaScript safe-integer range", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 1,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "single",
+        active_clip_ids: [Number.MAX_SAFE_INTEGER + 1],
+        overlay_opacity: 0.5,
+        max_visible_clips: 1,
+        autoplay: false,
+        clips: [
+          {
+            id: Number.MAX_SAFE_INTEGER + 1,
+            label: "Unsafe",
+            source_format: "RGB24",
+            source_width: 1,
+            source_height: 1,
+            output_width: 1,
+            output_height: 1,
+            warnings: [],
+          },
+        ],
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects aligned metadata with mismatched source geometry", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "metadata",
+        session_id: "session-1",
+        status: "initialized",
+        num_frames: 1,
+        fps_num: 24,
+        fps_den: 1,
+        mode: "difference",
+        active_clip_ids: ["Source", "Filtered"],
+        overlay_opacity: 0.5,
+        max_visible_clips: 4,
+        autoplay: false,
+        clips: [
+          {
+            id: "Source",
+            label: "Source",
+            source_format: "RGB24",
+            source_width: 640,
+            source_height: 360,
+            output_width: 640,
+            output_height: 360,
+            warnings: [],
+          },
+          {
+            id: "Filtered",
+            label: "Filtered",
+            source_format: "RGB24",
+            source_width: 1280,
+            source_height: 720,
+            output_width: 1280,
+            output_height: 720,
+            warnings: [],
           },
         ],
       }),

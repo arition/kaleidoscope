@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from .protocol import (
 from .session import PreviewSession
 
 if TYPE_CHECKING:
+    from .protocol import PreviewMetadataPayload, SetViewMessage
     from .sources import PreviewConfig
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -40,6 +42,7 @@ class PreviewWidget(anywidget.AnyWidget):
         **kwargs: Any,
     ) -> None:
         super().__init__(session_id=session_id or uuid4().hex, **kwargs)
+        self._state_lock = RLock()
         self._config = config
         self._session = (
             PreviewSession(
@@ -53,6 +56,12 @@ class PreviewWidget(anywidget.AnyWidget):
         if config is not None:
             self.set_trait("mode", config.mode)
             self.set_trait("active_clip_ids", list(config.active_clip_ids))
+        self._view_generation = 0
+        self._latest_generation = 0
+        self._view_mode = config.mode if config is not None else "single"
+        self._view_active_clip_ids = (
+            tuple(config.active_clip_ids) if config is not None else ()
+        )
         self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
             "awaiting_ready"
         )
@@ -60,13 +69,16 @@ class PreviewWidget(anywidget.AnyWidget):
         self.on_msg(self._handle_custom_message)
 
     def _reject_frontend_message(self, error: ProtocolError) -> None:
-        self._frontend_state = "terminal"
-        self.set_trait("status", "error")
+        with self._state_lock:
+            self._frontend_state = "terminal"
+            self.set_trait("status", "error")
+            self.set_trait("playing", False)
+            self._delivered_frames.clear()
         if self._session is not None:
             self._session.close()
         self.send(error_message(self.session_id, error))
 
-    def _metadata_payload(self) -> dict[str, object] | None:
+    def _metadata_payload(self) -> PreviewMetadataPayload | None:
         if self._config is None:
             return None
         return {
@@ -75,6 +87,7 @@ class PreviewWidget(anywidget.AnyWidget):
             "fps_den": self._config.fps.denominator,
             "mode": self._config.mode,
             "active_clip_ids": list(self._config.active_clip_ids),
+            "overlay_opacity": self._config.overlay_opacity,
             "max_visible_clips": self._config.max_visible_clips,
             "autoplay": self._config.autoplay,
             "clips": [
@@ -184,6 +197,9 @@ class PreviewWidget(anywidget.AnyWidget):
             if message["type"] == "set_playing":
                 self.set_trait("playing", message["playing"])
                 return
+            if message["type"] == "set_view":
+                self._apply_view(message)
+                return
             if message["type"] == "ack_frame_set":
                 identity = (message["request_id"], message["generation"])
                 delivered_frame = self._delivered_frames.pop(identity, None)
@@ -197,37 +213,108 @@ class PreviewWidget(anywidget.AnyWidget):
                 if message["outcome"] == "painted" and delivered_frame is None:
                     self.set_trait("current_frame", frame)
                 return
+            if (
+                self._view_active_clip_ids
+                and tuple(message["clip_ids"]) != self._view_active_clip_ids
+            ):
+                raise ValueError(
+                    "Frame-set request clip IDs do not match the active view."
+                )
+            if message["generation"] < self._view_generation:
+                raise ValueError(
+                    "Frame-set request generation is older than the active view."
+                )
             self._session.request_frame_set(
                 request_id=message["request_id"],
                 generation=message["generation"],
                 frame=message["frame"],
                 clip_ids=message["clip_ids"],
             )
+            self._latest_generation = max(
+                self._latest_generation,
+                message["generation"],
+            )
         except ValueError as exception:
             self._reject_frontend_message(
                 ProtocolError("invalid_message", str(exception))
             )
+
+    def _apply_view(self, message: SetViewMessage) -> None:
+        if self._config is None:
+            raise ValueError("Comparison views require initialized clip metadata.")
+        generation = message["generation"]
+        mode = message["mode"]
+        clip_ids = tuple(message["clip_ids"])
+        clips = {clip.id: clip for clip in self._config.clips}
+        if any(clip_id not in clips for clip_id in clip_ids):
+            raise ValueError("Comparison view contains an unknown clip ID.")
+        if len(clip_ids) > self._config.max_visible_clips:
+            raise ValueError(
+                "Comparison view exceeds the configured visible-clip limit."
+            )
+        if mode in {"wipe", "overlay", "difference"}:
+            first, second = (clips[clip_id] for clip_id in clip_ids)
+            if (
+                first.source_width != second.source_width
+                or first.source_height != second.source_height
+            ):
+                raise ValueError(
+                    "Aligned comparison clips require matching source dimensions."
+                )
+        active_changed = clip_ids != self._view_active_clip_ids
+        if generation < self._latest_generation:
+            raise ValueError(
+                "Comparison view generation is older than the latest request."
+            )
+        if (
+            active_changed
+            and generation == self._latest_generation
+            and generation > self._view_generation
+        ):
+            raise ValueError(
+                "An active comparison view must be announced before its frame request."
+            )
+        if generation < self._view_generation or (
+            active_changed and generation == self._view_generation
+        ):
+            raise ValueError("Comparison view generation must advance monotonically.")
+        if generation > self._latest_generation:
+            if self._session is None:
+                raise ValueError("Comparison views require an initialized session.")
+            self._session.advance_generation(generation)
+            self._latest_generation = generation
+        self._view_generation = generation
+        self._view_mode = mode
+        self._view_active_clip_ids = clip_ids
+        self.set_trait("mode", mode)
+        self.set_trait("active_clip_ids", list(clip_ids))
 
     def _send_session_message(
         self,
         content: dict[str, object],
         buffers: list[bytes],
     ) -> None:
-        if content.get("type") == "frame_set":
-            request_id = content.get("request_id")
-            generation = content.get("generation")
-            frame = content.get("frame")
-            if (
-                isinstance(request_id, int)
-                and isinstance(generation, int)
-                and isinstance(frame, int)
-            ):
-                self._delivered_frames[(request_id, generation)] = frame
-        self.send(content, buffers=buffers)
+        with self._state_lock:
+            if self._frontend_state == "terminal":
+                return
+            if content.get("type") == "frame_set":
+                request_id = content.get("request_id")
+                generation = content.get("generation")
+                frame = content.get("frame")
+                if (
+                    isinstance(request_id, int)
+                    and isinstance(generation, int)
+                    and isinstance(frame, int)
+                ):
+                    self._delivered_frames[(request_id, generation)] = frame
+            self.send(content, buffers=buffers)
 
     def close(self) -> None:
-        self._frontend_state = "terminal"
-        self._delivered_frames.clear()
+        with self._state_lock:
+            self._frontend_state = "terminal"
+            self.set_trait("status", "closed")
+            self.set_trait("playing", False)
+            self._delivered_frames.clear()
         if self._session is not None:
             self._session.close()
         super().close()

@@ -2,13 +2,19 @@ import type { RenderProps } from "@anywidget/types";
 
 import {
   createFrameSetAck,
-  createSetPlayingMessage,
   createReadyMessage,
+  createSetPlayingMessage,
+  createSetViewMessage,
   parseBackendMessage,
   ProtocolError,
   validateFrameSetBuffers,
 } from "./protocol.js";
 import type { FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
+import {
+  createComparisonState,
+  transitionComparisonState,
+} from "./comparison.js";
+import type { ComparisonState } from "./comparison.js";
 import { paintFrameSet, renderMetadata } from "./player.js";
 import type { PlayerView } from "./player.js";
 import {
@@ -27,6 +33,8 @@ function createStatus(text: string): HTMLElement {
 }
 
 type KaleidoscopeRenderProps = Pick<RenderProps, "model" | "el" | "signal">;
+
+const MAX_ACTIVE_DECODE_SETS = 2;
 
 const WEBP_DECODE_PROBE = new Uint8Array([
   82, 73, 70, 70, 28, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 15, 0, 0,
@@ -60,11 +68,27 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   }
 
   let metadata: PreviewMetadataMessage | undefined;
+  let comparisonState: ComparisonState | undefined;
   let playerView: PlayerView | undefined;
   let seekScheduler: PausedSeekScheduler | undefined;
   let playbackController: PlaybackController | undefined;
   let currentRequest:
     | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
+    | undefined;
+  let unacknowledgedDelivery:
+    | {
+        requestId: number;
+        generation: number;
+        acknowledgeStale(): void;
+      }
+    | undefined;
+  let lastAcknowledgedRequestId = -1;
+  let activeDecodeSets = 0;
+  let deferredDecodeRetry:
+    | {
+        expected: Pick<FrameSetMessage, "request_id" | "generation" | "frame">;
+        resume: boolean;
+      }
     | undefined;
   let resumeAfterPaint:
     | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
@@ -72,11 +96,63 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   let resumeAfterScrub = false;
   let autoplayPending = false;
   let resumeAfterVisibility = false;
+  let comparisonFramePending = false;
+  let comparisonFrameRequired = false;
+
+  const requestsMatch = (
+    left: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined,
+    right: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined,
+  ): boolean =>
+    left !== undefined &&
+    right !== undefined &&
+    left.request_id === right.request_id &&
+    left.generation === right.generation &&
+    left.frame === right.frame;
 
   const updateStatus = (text: string): void => {
     const liveStatus = el.querySelector<HTMLElement>("[role='status']");
     if (liveStatus !== null) {
       liveStatus.textContent = text;
+    }
+  };
+
+  const setCurrentRequest = (
+    request:
+      | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
+      | undefined,
+  ): void => {
+    if (
+      unacknowledgedDelivery !== undefined &&
+      (request === undefined ||
+        request.request_id !== unacknowledgedDelivery.requestId ||
+        request.generation !== unacknowledgedDelivery.generation)
+    ) {
+      unacknowledgedDelivery.acknowledgeStale();
+    }
+    if (
+      deferredDecodeRetry !== undefined &&
+      !requestsMatch(request, deferredDecodeRetry.expected)
+    ) {
+      deferredDecodeRetry = undefined;
+    }
+    currentRequest = request;
+  };
+
+  const retryDeferredDecode = (): void => {
+    const deferred = deferredDecodeRetry;
+    if (
+      deferred === undefined ||
+      activeDecodeSets >= MAX_ACTIVE_DECODE_SETS ||
+      !requestsMatch(currentRequest, deferred.expected) ||
+      seekScheduler === undefined ||
+      signal.aborted
+    ) {
+      return;
+    }
+    deferredDecodeRetry = undefined;
+    const request = seekScheduler.requestExact(deferred.expected.frame);
+    if (deferred.resume) {
+      resumeAfterPaint = request;
     }
   };
 
@@ -109,12 +185,16 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       if (message.type === "metadata") {
         if ("clips" in message) {
           metadata = message;
+          comparisonState = createComparisonState(message);
           seekScheduler = new PausedSeekScheduler({
             sessionId,
             numFrames: message.num_frames,
             clipIds: message.active_clip_ids,
             send: (request) => {
-              currentRequest = request;
+              setCurrentRequest(request);
+              if (comparisonFrameRequired) {
+                comparisonFramePending = true;
+              }
               model.send(request);
             },
           });
@@ -146,8 +226,101 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                 }
                 resumeAfterPaint = undefined;
                 playbackController?.pause(false);
-                currentRequest = undefined;
+                setCurrentRequest(undefined);
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
+              },
+              changeComparison: (transition) => {
+                if (
+                  metadata === undefined ||
+                  comparisonState === undefined ||
+                  seekScheduler === undefined
+                ) {
+                  return;
+                }
+                const previous = comparisonState;
+                let next;
+                try {
+                  next = transitionComparisonState(
+                    previous,
+                    metadata,
+                    transition,
+                  );
+                } catch (error) {
+                  updateStatus(
+                    error instanceof Error
+                      ? error.message
+                      : "Invalid comparison selection.",
+                  );
+                  playerView?.setComparison(previous);
+                  return;
+                }
+
+                comparisonState = next.state;
+                metadata = {
+                  ...metadata,
+                  mode: next.state.mode,
+                  active_clip_ids: [...next.state.activeClipIds],
+                };
+                const deferComposition =
+                  next.requiresFrameSet || comparisonFrameRequired;
+                playerView?.setComparison(next.state, deferComposition);
+
+                const needsFrameSet =
+                  next.requiresFrameSet ||
+                  (comparisonFrameRequired && !comparisonFramePending);
+
+                const durableViewChanged =
+                  previous.mode !== next.state.mode ||
+                  previous.overlayOpacity !== next.state.overlayOpacity ||
+                  needsFrameSet;
+                if (!durableViewChanged) {
+                  return;
+                }
+
+                if (!needsFrameSet) {
+                  model.send(
+                    createSetViewMessage(
+                      sessionId,
+                      seekScheduler.generation,
+                      next.state.mode,
+                      next.state.activeClipIds,
+                      next.state.overlayOpacity,
+                    ),
+                  );
+                  return;
+                }
+
+                const shouldResume =
+                  playbackController?.playing === true ||
+                  resumeAfterPaint !== undefined ||
+                  resumeAfterScrub ||
+                  deferredDecodeRetry?.resume === true;
+                const frame =
+                  playbackController?.playing === true
+                    ? playbackController.pause(false)
+                    : playerView?.getFrame() ?? 0;
+                setCurrentRequest(undefined);
+                resumeAfterPaint = undefined;
+                resumeAfterScrub = false;
+                const request = seekScheduler.requestView(
+                  frame,
+                  next.state.activeClipIds,
+                  (generation) =>
+                    model.send(
+                      createSetViewMessage(
+                        sessionId,
+                        generation,
+                        next.state.mode,
+                        next.state.activeClipIds,
+                        next.state.overlayOpacity,
+                      ),
+                    ),
+                );
+                comparisonFrameRequired = true;
+                comparisonFramePending = true;
+                if (shouldResume) {
+                  resumeAfterPaint = request;
+                }
               },
               togglePlaying,
             },
@@ -177,13 +350,29 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             "Frame payload arrived before preview metadata.",
           );
         }
+        if (message.request_id <= lastAcknowledgedRequestId) {
+          return;
+        }
+        if (unacknowledgedDelivery !== undefined) {
+          if (
+            unacknowledgedDelivery.requestId === message.request_id &&
+            unacknowledgedDelivery.generation === message.generation
+          ) {
+            return;
+          }
+          throw new ProtocolError(
+            "invalid_message",
+            "A frame payload arrived before the previous delivery was acknowledged.",
+          );
+        }
         const expected = currentRequest;
-        const expectedClipIds = metadata.active_clip_ids;
+        const expectedClipIds =
+          comparisonState?.activeClipIds ?? metadata.active_clip_ids;
         const manifestClipIds = message.frames.map((frame) => frame.clip_id);
         const isCurrent = (): boolean =>
           !signal.aborted &&
           expected !== undefined &&
-          currentRequest === expected &&
+          requestsMatch(currentRequest, expected) &&
           message.request_id === expected.request_id &&
           message.generation === expected.generation &&
           message.frame === expected.frame &&
@@ -194,6 +383,23 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         const acknowledge = (
           outcome: "painted" | "stale" | "decode_error",
         ): void => {
+          if (acknowledged) {
+            return;
+          }
+          acknowledged = true;
+          lastAcknowledgedRequestId = Math.max(
+            lastAcknowledgedRequestId,
+            message.request_id,
+          );
+          if (outcome !== "painted") {
+            deliveryController.abort();
+          }
+          if (
+            unacknowledgedDelivery?.requestId === message.request_id &&
+            unacknowledgedDelivery.generation === message.generation
+          ) {
+            unacknowledgedDelivery = undefined;
+          }
           model.send(
             createFrameSetAck(
               sessionId,
@@ -203,10 +409,38 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             ),
           );
         };
+        let acknowledged = false;
+        const deliveryController = new AbortController();
+        unacknowledgedDelivery = {
+          requestId: message.request_id,
+          generation: message.generation,
+          acknowledgeStale: () => acknowledge("stale"),
+        };
         if (!isCurrent()) {
           acknowledge("stale");
           return;
         }
+        if (activeDecodeSets >= MAX_ACTIVE_DECODE_SETS) {
+          const resume =
+            resumeAfterPaint !== undefined &&
+            resumeAfterPaint.request_id === message.request_id &&
+            resumeAfterPaint.generation === message.generation;
+          if (resume) {
+            resumeAfterPaint = undefined;
+          }
+          deferredDecodeRetry = {
+            expected: {
+              request_id: message.request_id,
+              generation: message.generation,
+              frame: message.frame,
+            },
+            resume,
+          };
+          comparisonFramePending = false;
+          acknowledge("stale");
+          return;
+        }
+        activeDecodeSets += 1;
         let painted: boolean;
         try {
           validateFrameSetBuffers(message, buffers);
@@ -215,6 +449,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             message,
             buffers,
             isCurrent,
+            deliveryController.signal,
           );
         } catch (error) {
           if (!isCurrent()) {
@@ -222,10 +457,18 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             return;
           }
           acknowledge("decode_error");
+          comparisonFramePending = false;
+          resumeAfterPaint = undefined;
+          setCurrentRequest(undefined);
           playbackController?.pause(false);
           throw error;
+        } finally {
+          activeDecodeSets -= 1;
+          retryDeferredDecode();
         }
         if (painted) {
+          comparisonFramePending = false;
+          comparisonFrameRequired = false;
           playbackController?.setCurrentFrame(message.frame);
           updateStatus(`Frame ${message.frame} ready.`);
           acknowledge("painted");
@@ -258,6 +501,11 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       ) {
         return;
       }
+      if (message.request_id !== undefined) {
+        comparisonFramePending = false;
+        resumeAfterPaint = undefined;
+        setCurrentRequest(undefined);
+      }
       const clip = metadata?.clips.find(
         (candidate) => candidate.id === message.clip_id,
       );
@@ -283,7 +531,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         const pausedFrame = playbackController.pause(false);
         resumeAfterVisibility =
           metadata !== undefined && pausedFrame < metadata.num_frames - 1;
-        currentRequest = undefined;
+        setCurrentRequest(undefined);
       }
     } else if (resumeAfterVisibility) {
       playWhenVisible();
@@ -295,8 +543,12 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   signal.addEventListener(
     "abort",
     () => {
+      deferredDecodeRetry = undefined;
+      setCurrentRequest(undefined);
       playbackController?.close();
       seekScheduler?.close();
+      // Any not-yet-delivered request is released by the widget/session close
+      // that owns this abort signal; only received deliveries can be ACKed here.
       model.off("msg:custom", onMessage);
     },
     { once: true },

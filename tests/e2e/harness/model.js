@@ -9,6 +9,9 @@ const showConversionWarning = new URLSearchParams(window.location.search).has(
 const showSideBySide = new URLSearchParams(window.location.search).has(
   "side-by-side",
 );
+const testComparison = new URLSearchParams(window.location.search).has(
+  "comparison",
+);
 const showWebp = new URLSearchParams(window.location.search).get("codec") === "webp";
 const testRapidSeek = new URLSearchParams(window.location.search).has(
   "rapid-seek",
@@ -20,7 +23,8 @@ const testSlowPlayback = new URLSearchParams(window.location.search).has(
   "slow-playback",
 );
 const clipId = showConversionWarning ? "Filtered" : "Source";
-const activeClipIds = showSideBySide ? ["Source", "Filtered"] : [clipId];
+let activeClipIds =
+  showSideBySide || testComparison ? ["Source", "Filtered"] : [clipId];
 
 const clip = (id, sourceFormat = "RGB24", warnings = []) => ({
   id,
@@ -63,12 +67,13 @@ const model = {
           num_frames: testRapidSeek ? 10 : testPlayback ? 4 : testSlowPlayback ? 6 : 1,
           fps_num: testSlowPlayback ? 8 : 24,
           fps_den: 1,
-          mode: showSideBySide ? "side-by-side" : "single",
+          mode: showSideBySide || testComparison ? "side-by-side" : "single",
           active_clip_ids: activeClipIds,
-          max_visible_clips: 4,
+          overlay_opacity: 0.5,
+          max_visible_clips: testComparison ? 2 : 4,
           autoplay: false,
-          clips: showSideBySide
-            ? [clip("Source"), clip("Filtered")]
+          clips: showSideBySide || testComparison
+            ? [clip("Source"), clip("Filtered"), ...(testComparison ? [clip("Reference")] : [])]
             : [
                 clip(
                   clipId,
@@ -93,10 +98,23 @@ const model = {
       });
       return;
     }
+    if (message.type === "set_view") {
+      activeClipIds = [...message.clip_ids];
+      return;
+    }
     if (message.type === "request_frame_set") {
-      const fixtureNames = showSideBySide
-        ? ["frame.jpg", "filtered.jpg"]
-        : [showWebp ? "frame.webp" : "frame.jpg"];
+      const responseClipIds = [...message.clip_ids];
+      const fixtureNames = responseClipIds.map((id) =>
+        showConversionWarning
+          ? "frame.jpg"
+          : id === "Source"
+          ? showWebp
+            ? "frame.webp"
+            : "frame.jpg"
+          : id === "Filtered"
+            ? "filtered.jpg"
+            : "reference.jpg",
+      );
       const responseDelay =
         testRapidSeek && message.frame === 2
           ? 120
@@ -117,7 +135,7 @@ const model = {
               request_id: message.request_id,
               generation: message.generation,
               frame: message.frame,
-              frames: activeClipIds.map((activeClipId, bufferIndex) => ({
+                frames: responseClipIds.map((activeClipId, bufferIndex) => ({
                   clip_id: activeClipId,
                   buffer_index: bufferIndex,
                   mime: showWebp ? "image/webp" : "image/jpeg",

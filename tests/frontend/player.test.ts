@@ -25,6 +25,7 @@ describe("metadata presentation", () => {
       fps_den: 1001,
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -76,6 +77,7 @@ describe("metadata presentation", () => {
       fps_den: 1,
       mode: "single",
       active_clip_ids: ["B"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -132,6 +134,7 @@ describe("metadata presentation", () => {
       fps_den: 1,
       mode: "single",
       active_clip_ids: ["Filtered"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -201,6 +204,7 @@ describe("metadata presentation", () => {
       fps_den: 1,
       mode: "single",
       active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -313,6 +317,7 @@ describe("metadata presentation", () => {
       fps_den: 1,
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -422,6 +427,7 @@ describe("metadata presentation", () => {
       fps_den: 1,
       mode: "side-by-side",
       active_clip_ids: ["Source", "Filtered"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -504,6 +510,7 @@ describe("metadata presentation", () => {
       fps_den: 1001,
       mode: "single",
       active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -606,6 +613,7 @@ describe("metadata presentation", () => {
       fps_den: 1001,
       mode: "single",
       active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
@@ -656,6 +664,22 @@ describe("metadata presentation", () => {
     );
     expect(frame?.value).toBe("0");
 
+    const next = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Next frame']",
+    );
+    next?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: " ", bubbles: true }),
+    );
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "set_playing",
+      ),
+    ).toEqual([]);
+
     element.dispatchEvent(
       new KeyboardEvent("keydown", {
         key: "ArrowRight",
@@ -701,6 +725,7 @@ describe("metadata presentation", () => {
       fps_den: 1001,
       mode: "single",
       active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
       max_visible_clips: 4,
       autoplay: false,
       clips: [
