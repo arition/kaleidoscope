@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T9 complete; T10 is next
+Status: G1 approved; T10 complete; T11 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.5 approved
 
@@ -79,11 +79,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Implement wipe, opacity overlay, and 8-bit visual difference.
   - [x] Prove pair-mode switches reuse decoded images without rerendering.
 
-- [ ] **T10 - Recoverable errors and complete lifecycle** (depends on T8 and T9)
-  - [ ] Preserve the last complete set on clip-specific failures.
-  - [ ] Implement decode-error ACK, retry/seek, and disconnected states.
-  - [ ] Make close/removal cleanup idempotent and suppress late completions.
-  - [ ] Prove multiple widgets remain independent and leak-free.
+- [x] **T10 - Recoverable errors and complete lifecycle** (depends on T8 and T9)
+  - [x] Preserve the last complete set on clip-specific failures.
+  - [x] Implement decode-error ACK, retry/seek, and disconnected states.
+  - [x] Make close/removal cleanup idempotent and suppress late completions.
+  - [x] Prove multiple widgets remain independent and leak-free.
 
 - [ ] **T11 - Accessible responsive notebook player** (depends on T10)
   - [ ] Complete keyboard scoping, labels, live regions, focus, and contrast.

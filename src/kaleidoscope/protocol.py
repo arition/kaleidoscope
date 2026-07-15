@@ -10,6 +10,20 @@ PROTOCOL_VERSION: Literal[1] = 1
 MAX_FRAME_BUFFER_BYTES = 16 * 1024 * 1024
 MAX_FRAME_SET_BYTES = 64 * 1024 * 1024
 
+type BackendErrorCode = Literal[
+    "invalid_message",
+    "protocol_mismatch",
+    "unsupported_codec",
+    "invalid_clip",
+    "unsupported_dimensions",
+    "render_failed",
+    "conversion_failed",
+    "encode_failed",
+    "decode_failed",
+    "kernel_disconnected",
+    "session_closed",
+]
+
 
 class Capabilities(TypedDict):
     image_bitmap: bool
@@ -112,7 +126,7 @@ class ErrorMessage(TypedDict):
     protocol: Literal[1]
     type: Literal["error"]
     session_id: str
-    code: str
+    code: BackendErrorCode
     message: str
     recoverable: bool
     request_id: NotRequired[int]
@@ -320,7 +334,7 @@ def runtime_error_message(
     request_id: int,
     generation: int,
     clip_id: ClipId,
-    code: str,
+    code: Literal["render_failed", "conversion_failed", "encode_failed"],
     message: str,
 ) -> dict[str, object]:
     error: ErrorMessage = {

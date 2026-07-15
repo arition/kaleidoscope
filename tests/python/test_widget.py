@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from fractions import Fraction
+from threading import Event, Thread
 from typing import Any
+
+import anywidget
 
 import kaleidoscope
 from kaleidoscope import PreviewWidget, preview
@@ -11,6 +14,7 @@ from kaleidoscope import PreviewWidget, preview
 class FakeSession:
     def __init__(self) -> None:
         self.closed = False
+        self.close_calls = 0
         self.requests: list[dict[str, object]] = []
         self.acks: list[dict[str, object]] = []
         self.generations: list[int] = []
@@ -26,6 +30,7 @@ class FakeSession:
         return 12
 
     def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
 
 
@@ -527,6 +532,124 @@ def test_explicit_close_clears_playing_and_marks_the_widget_closed() -> None:
     assert widget.status == "closed"
     assert widget.playing is False
     assert session.closed is True
+
+
+def test_explicit_close_is_idempotent() -> None:
+    session = FakeSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+
+    widget.close()
+    widget.close()
+
+    assert widget.status == "closed"
+    assert widget.playing is False
+    assert session.close_calls == 1
+
+
+def test_close_after_terminal_error_still_closes_the_base_widget(
+    monkeypatch: Any,
+) -> None:
+    session = FakeSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "terminal"
+    widget.set_trait("status", "error")
+    base_close_calls = 0
+
+    def base_close(self: anywidget.AnyWidget) -> None:
+        del self
+        nonlocal base_close_calls
+        base_close_calls += 1
+
+    monkeypatch.setattr(anywidget.AnyWidget, "close", base_close)
+
+    widget.close()
+    widget.close()
+
+    assert base_close_calls == 1
+    assert session.close_calls == 1
+    assert widget.status == "closed"
+
+
+def test_close_wins_over_an_in_progress_frame_ack() -> None:
+    ack_entered = Event()
+    release_ack = Event()
+
+    class BlockingAckSession(FakeSession):
+        def ack_frame_set(self, **ack: object) -> int:
+            self.acks.append(ack)
+            ack_entered.set()
+            release_ack.wait(timeout=1)
+            raise ValueError("Frame-set ACK arrived after close.")
+
+    session = BlockingAckSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget._delivered_frames[(1, 0)] = 0
+    content = {
+        "protocol": 1,
+        "type": "ack_frame_set",
+        "session_id": "session-1",
+        "request_id": 1,
+        "generation": 0,
+        "outcome": "painted",
+    }
+
+    handler = Thread(
+        target=lambda: widget._handle_custom_message(widget, content, []),
+        daemon=True,
+    )
+    handler.start()
+    assert ack_entered.wait(timeout=1)
+    widget.close()
+    release_ack.set()
+    handler.join(timeout=1)
+
+    assert handler.is_alive() is False
+    assert widget.status == "closed"
+    assert widget.playing is False
+
+
+def test_successful_frame_ack_cannot_update_current_frame_after_close() -> None:
+    ack_entered = Event()
+    release_ack = Event()
+
+    class BlockingAckSession(FakeSession):
+        def ack_frame_set(self, **ack: object) -> int:
+            self.acks.append(ack)
+            ack_entered.set()
+            release_ack.wait(timeout=1)
+            return 7
+
+    session = BlockingAckSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+    widget._frontend_state = "ready"
+    widget.set_trait("current_frame", 0)
+    content = {
+        "protocol": 1,
+        "type": "ack_frame_set",
+        "session_id": "session-1",
+        "request_id": 1,
+        "generation": 0,
+        "outcome": "painted",
+    }
+
+    handler = Thread(
+        target=lambda: widget._handle_custom_message(widget, content, []),
+        daemon=True,
+    )
+    handler.start()
+    assert ack_entered.wait(timeout=1)
+    widget.close()
+    release_ack.set()
+    handler.join(timeout=1)
+
+    assert handler.is_alive() is False
+    assert widget.status == "closed"
+    assert widget.current_frame == 0
 
 
 def test_terminal_widget_suppresses_late_session_delivery(monkeypatch: Any) -> None:

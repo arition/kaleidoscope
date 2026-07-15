@@ -36,6 +36,15 @@ type KaleidoscopeRenderProps = Pick<RenderProps, "model" | "el" | "signal">;
 
 const MAX_ACTIVE_DECODE_SETS = 2;
 
+function isCommLive(model: KaleidoscopeRenderProps["model"]): boolean {
+  const commLive = (
+    model as KaleidoscopeRenderProps["model"] & { comm_live?: unknown }
+  ).comm_live;
+  return commLive !== undefined
+    ? commLive !== false
+    : model.get("comm_live") !== false;
+}
+
 const WEBP_DECODE_PROBE = new Uint8Array([
   82, 73, 70, 70, 28, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 15, 0, 0,
   0, 47, 0, 0, 0, 0, 7, 16, 253, 143, 254, 7, 34, 162, 255, 1, 0,
@@ -98,6 +107,16 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   let resumeAfterVisibility = false;
   let comparisonFramePending = false;
   let comparisonFrameRequired = false;
+  let disconnected = false;
+  let terminal = false;
+  let terminalStatus = "Preview session is no longer available.";
+
+  const interactionBlocked = (): boolean => disconnected || terminal;
+
+  const blockedStatus = (): string =>
+    disconnected
+      ? "Kernel disconnected. Preview paused."
+      : terminalStatus;
 
   const requestsMatch = (
     left: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined,
@@ -166,6 +185,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   };
 
   const togglePlaying = (): void => {
+    if (interactionBlocked()) {
+      updateStatus(blockedStatus());
+      return;
+    }
     autoplayPending = false;
     resumeAfterPaint = undefined;
     resumeAfterScrub = false;
@@ -203,6 +226,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             message,
             {
               requestExact: (frame) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return playerView?.getFrame() ?? 0;
+                }
                 playbackController?.pause(false);
                 const request = seekScheduler?.requestExact(frame);
                 if (request === undefined) {
@@ -217,6 +244,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                 return request.frame;
               },
               scheduleScrub: (frame) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return playerView?.getFrame() ?? 0;
+                }
                 if (
                   playbackController?.playing ||
                   resumeAfterPaint !== undefined ||
@@ -230,6 +261,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
               },
               changeComparison: (transition) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return;
+                }
                 if (
                   metadata === undefined ||
                   comparisonState === undefined ||
@@ -505,15 +540,27 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         comparisonFramePending = false;
         resumeAfterPaint = undefined;
         setCurrentRequest(undefined);
+        playbackController?.pause(false);
       }
       const clip = metadata?.clips.find(
         (candidate) => candidate.id === message.clip_id,
       );
-      updateStatus(
+      const errorStatus =
         clip === undefined
           ? `Protocol error: ${message.message}`
-          : `${clip.label}: ${message.message}`,
-      );
+          : `${clip.label}: ${message.message}`;
+      if (!message.recoverable) {
+        terminal = true;
+        terminalStatus = errorStatus;
+        autoplayPending = false;
+        deferredDecodeRetry = undefined;
+        resumeAfterPaint = undefined;
+        resumeAfterScrub = false;
+        resumeAfterVisibility = false;
+        setCurrentRequest(undefined);
+        playbackController?.pause(false);
+      }
+      updateStatus(errorStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
       updateStatus(`Protocol error: ${message}`);
@@ -525,6 +572,22 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   };
 
   model.on("msg:custom", onMessage);
+  const onCommLiveUpdate = (): void => {
+    if (isCommLive(model)) {
+      return;
+    }
+    disconnected = true;
+    autoplayPending = false;
+    deferredDecodeRetry = undefined;
+    resumeAfterPaint = undefined;
+    resumeAfterScrub = false;
+    resumeAfterVisibility = false;
+    setCurrentRequest(undefined);
+    playbackController?.pause(false);
+    updateStatus("Kernel disconnected. Preview paused.");
+  };
+  model.on("change:comm_live", onCommLiveUpdate);
+  model.on("comm_live_update", onCommLiveUpdate);
   const onVisibilityChange = (): void => {
     if (document.visibilityState === "hidden") {
       if (playbackController?.playing) {
@@ -550,6 +613,8 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       // Any not-yet-delivered request is released by the widget/session close
       // that owns this abort signal; only received deliveries can be ACKed here.
       model.off("msg:custom", onMessage);
+      model.off("change:comm_live", onCommLiveUpdate);
+      model.off("comm_live_update", onCommLiveUpdate);
     },
     { once: true },
   );

@@ -1,6 +1,6 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T9 complete; G1 approved; Task T10 is next
+Status: T1-T10 complete; G1 approved; Task T11 is next
 Source: `tasks/spec.md`, revision 0.5 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
@@ -307,21 +307,21 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Stable error codes cover validation, render, conversion, encode, decode, protocol, disconnect, and closed-session failures.
-- [ ] A failed member identifies its clip and never causes a partial new comparison paint.
-- [ ] Recoverable failures pause playback, retain the last complete set, and allow retry or seek.
-- [ ] Decode failure ACKs `decode_error` and releases all staged browser resources.
-- [ ] Widget close clears caches, marks the session closed, ignores late futures, and is idempotent.
-- [ ] anywidget `AbortSignal` removes DOM and model listeners and stops further sends after view removal.
-- [ ] Kernel disconnect shows a paused disconnected state with the last complete set retained.
-- [ ] Multiple widgets have independent sessions, caches, generations, selections, and playback state.
-- [ ] Exception content is inserted only as text and logs do not include pixel buffers or notebook source.
+- [x] Stable error codes cover validation, render, conversion, encode, decode, protocol, disconnect, and closed-session failures.
+- [x] A failed member identifies its clip and never causes a partial new comparison paint.
+- [x] Recoverable failures pause playback, retain the last complete set, and allow retry or seek.
+- [x] Decode failure ACKs `decode_error` and releases all staged browser resources.
+- [x] Widget close clears caches, marks the session closed, ignores late futures, and is idempotent.
+- [x] anywidget `AbortSignal` removes DOM and model listeners and stops further sends after view removal.
+- [x] Kernel disconnect shows a paused disconnected state with the last complete set retained.
+- [x] Multiple widgets have independent sessions, caches, generations, selections, and playback state.
+- [x] Exception content is inserted only as text and logs do not include pixel buffers or notebook source.
 
 **Verification:**
 
-- [ ] `hatch run test:pytest tests/python/test_lifecycle.py tests/python/test_session.py -k "error or close or late or multiple"`
-- [ ] `npm test -- --run tests/frontend/player.test.ts -t "error|disconnect|cleanup"`
-- [ ] `npm run test:e2e -- --grep "render error|disconnect|two widgets|removal"`
+- [x] `hatch run test:pytest tests/python/test_session.py tests/python/test_widget.py -k "error or close or late or multiple"`
+- [x] `npm test -- --run tests/frontend/widget.test.ts tests/frontend/comparison.test.ts`
+- [x] `npm run test:e2e`
 
 ## T11: Accessible Responsive Notebook Player
 

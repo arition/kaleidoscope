@@ -875,6 +875,57 @@ def test_encoded_frame_cache_evicts_least_recently_used_entry() -> None:
     assert node.requested == [0, 1, 0]
 
 
+def test_close_is_idempotent_clears_cache_and_ignores_late_completion() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node, cache_size=1),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    first_frame = FakeFrame()
+    node.future.set_result(first_frame)
+    session.ack_frame_set(request_id=0, generation=0, outcome="painted")
+
+    node.future = Future()
+    session.request_frame_set(
+        request_id=1,
+        generation=1,
+        frame=1,
+        clip_ids=("Source",),
+    )
+    session.close()
+    session.close()
+    late_frame = FakeFrame()
+    node.future.set_result(late_frame)
+
+    assert first_frame.closed is True
+    assert late_frame.closed is True
+    assert sent[0][0]["type"] == "frame_set"
+    assert len(sent) == 1
+    assert session._cache.get(("Source", 0)) is None
+
+    session.request_frame_set(
+        request_id=2,
+        generation=2,
+        frame=0,
+        clip_ids=("Source",),
+    )
+    assert node.requested == [0, 1]
+
+
 def test_frame_set_rejects_duplicate_and_unknown_clip_ids() -> None:
     source_node = FakeVideoNode()
     filtered_node = FakeVideoNode()

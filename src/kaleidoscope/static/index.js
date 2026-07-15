@@ -28,6 +28,12 @@ function isClipId(value) {
 function isComparisonMode(value) {
   return value === "single" || value === "side-by-side" || value === "wipe" || value === "overlay" || value === "difference";
 }
+function isBackendErrorCode(value) {
+  return value === "invalid_message" || value === "protocol_mismatch" || value === "unsupported_codec" || value === "invalid_clip" || value === "unsupported_dimensions" || value === "render_failed" || value === "conversion_failed" || value === "encode_failed" || value === "decode_failed" || value === "kernel_disconnected" || value === "session_closed";
+}
+function isRuntimeClipErrorCode(value) {
+  return value === "render_failed" || value === "conversion_failed" || value === "encode_failed";
+}
 function isClipWarning(value) {
   return isRecord(value) && (value.code === "automatic_rgb24_conversion" || value.code === "assumed_color_metadata") && typeof value.message === "string" && value.message.length > 0;
 }
@@ -169,12 +175,19 @@ function parseBackendMessage(value) {
   if (value.type === "frame_set" && isFrameSetMessage(value)) {
     return value;
   }
-  if (value.type === "error" && typeof value.session_id === "string" && value.session_id.length > 0 && typeof value.code === "string" && value.code.length > 0 && typeof value.message === "string" && typeof value.recoverable === "boolean") {
+  if (value.type === "error" && typeof value.session_id === "string" && value.session_id.length > 0 && isBackendErrorCode(value.code) && typeof value.message === "string" && typeof value.recoverable === "boolean") {
     const hasRequestContext = "request_id" in value || "generation" in value || "clip_id" in value;
     if (hasRequestContext && (!isNonnegativeInteger(value.request_id) || !isNonnegativeInteger(value.generation) || !isClipId(value.clip_id))) {
       throw new ProtocolError(
         "invalid_message",
         "Malformed backend error context."
+      );
+    }
+    const runtimeClipError = isRuntimeClipErrorCode(value.code);
+    if (runtimeClipError && (!value.recoverable || !hasRequestContext) || !runtimeClipError && (value.recoverable || hasRequestContext)) {
+      throw new ProtocolError(
+        "invalid_message",
+        "Backend error semantics do not match the error code."
       );
     }
     return value;
@@ -1577,6 +1590,10 @@ function createStatus(text) {
   return status;
 }
 var MAX_ACTIVE_DECODE_SETS = 2;
+function isCommLive(model) {
+  const commLive = model.comm_live;
+  return commLive !== void 0 ? commLive !== false : model.get("comm_live") !== false;
+}
 var WEBP_DECODE_PROBE = new Uint8Array([
   82,
   73,
@@ -1654,6 +1671,11 @@ function render({ model, el, signal }) {
   let resumeAfterVisibility = false;
   let comparisonFramePending = false;
   let comparisonFrameRequired = false;
+  let disconnected = false;
+  let terminal = false;
+  let terminalStatus = "Preview session is no longer available.";
+  const interactionBlocked = () => disconnected || terminal;
+  const blockedStatus = () => disconnected ? "Kernel disconnected. Preview paused." : terminalStatus;
   const requestsMatch = (left, right) => left !== void 0 && right !== void 0 && left.request_id === right.request_id && left.generation === right.generation && left.frame === right.frame;
   const updateStatus = (text) => {
     const liveStatus = el.querySelector("[role='status']");
@@ -1690,6 +1712,10 @@ function render({ model, el, signal }) {
     playbackController?.play();
   };
   const togglePlaying = () => {
+    if (interactionBlocked()) {
+      updateStatus(blockedStatus());
+      return;
+    }
     autoplayPending = false;
     resumeAfterPaint = void 0;
     resumeAfterScrub = false;
@@ -1723,6 +1749,10 @@ function render({ model, el, signal }) {
             message,
             {
               requestExact: (frame) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return playerView?.getFrame() ?? 0;
+                }
                 playbackController?.pause(false);
                 const request = seekScheduler?.requestExact(frame);
                 if (request === void 0) {
@@ -1737,6 +1767,10 @@ function render({ model, el, signal }) {
                 return request.frame;
               },
               scheduleScrub: (frame) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return playerView?.getFrame() ?? 0;
+                }
                 if (playbackController?.playing || resumeAfterPaint !== void 0 || resumeAfterScrub) {
                   resumeAfterScrub = true;
                 }
@@ -1746,6 +1780,10 @@ function render({ model, el, signal }) {
                 return seekScheduler?.scheduleScrub(frame) ?? 0;
               },
               changeComparison: (transition) => {
+                if (interactionBlocked()) {
+                  updateStatus(blockedStatus());
+                  return;
+                }
                 if (metadata === void 0 || comparisonState === void 0 || seekScheduler === void 0) {
                   return;
                 }
@@ -1966,13 +2004,24 @@ function render({ model, el, signal }) {
         comparisonFramePending = false;
         resumeAfterPaint = void 0;
         setCurrentRequest(void 0);
+        playbackController?.pause(false);
       }
       const clip = metadata?.clips.find(
         (candidate) => candidate.id === message.clip_id
       );
-      updateStatus(
-        clip === void 0 ? `Protocol error: ${message.message}` : `${clip.label}: ${message.message}`
-      );
+      const errorStatus = clip === void 0 ? `Protocol error: ${message.message}` : `${clip.label}: ${message.message}`;
+      if (!message.recoverable) {
+        terminal = true;
+        terminalStatus = errorStatus;
+        autoplayPending = false;
+        deferredDecodeRetry = void 0;
+        resumeAfterPaint = void 0;
+        resumeAfterScrub = false;
+        resumeAfterVisibility = false;
+        setCurrentRequest(void 0);
+        playbackController?.pause(false);
+      }
+      updateStatus(errorStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
       updateStatus(`Protocol error: ${message}`);
@@ -1982,6 +2031,22 @@ function render({ model, el, signal }) {
     void handleMessage(value, buffers);
   };
   model.on("msg:custom", onMessage);
+  const onCommLiveUpdate = () => {
+    if (isCommLive(model)) {
+      return;
+    }
+    disconnected = true;
+    autoplayPending = false;
+    deferredDecodeRetry = void 0;
+    resumeAfterPaint = void 0;
+    resumeAfterScrub = false;
+    resumeAfterVisibility = false;
+    setCurrentRequest(void 0);
+    playbackController?.pause(false);
+    updateStatus("Kernel disconnected. Preview paused.");
+  };
+  model.on("change:comm_live", onCommLiveUpdate);
+  model.on("comm_live_update", onCommLiveUpdate);
   const onVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
       if (playbackController?.playing) {
@@ -2004,6 +2069,8 @@ function render({ model, el, signal }) {
       playbackController?.close();
       seekScheduler?.close();
       model.off("msg:custom", onMessage);
+      model.off("change:comm_live", onCommLiveUpdate);
+      model.off("comm_live_update", onCommLiveUpdate);
     },
     { once: true }
   );

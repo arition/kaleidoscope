@@ -835,6 +835,66 @@ describe("atomic comparison painting", () => {
     expect(drawImage).toHaveBeenCalledTimes(2);
   });
 
+  it("pauses playback after a recoverable clip error and allows a seek retry", async () => {
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi
+        .fn()
+        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+    );
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    model.emit(metadata);
+    model.emit(frameSet(0), payloads());
+    await vi.waitFor(() => expect(drawImage).toHaveBeenCalledTimes(2));
+
+    element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
+    const activeRequest = frameRequests(model).at(-1);
+    if (activeRequest === undefined) {
+      throw new Error("Missing active playback request.");
+    }
+    model.emit({
+      protocol: 1,
+      type: "error",
+      session_id: "session-1",
+      request_id: activeRequest.request_id,
+      generation: activeRequest.generation,
+      clip_id: "Filtered",
+      code: "render_failed",
+      message: "The preview frame could not be rendered.",
+      recoverable: true,
+    });
+
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "set_playing",
+      session_id: "session-1",
+      playing: false,
+    });
+    expect(element.querySelector("button[aria-label='Play']")).not.toBeNull();
+    expect(element.querySelector("[role='status']")?.textContent).toBe(
+      "Filtered: The preview frame could not be rendered.",
+    );
+    expect(drawImage).toHaveBeenCalledTimes(2);
+
+    const seek = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Seek frame']",
+    );
+    if (seek === null) {
+      throw new Error("Missing seek control.");
+    }
+    seek.value = "1";
+    seek.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(frameRequests(model).at(-1)).toMatchObject({ frame: 1 });
+  });
+
   it("ignores a clip-specific error from a stale request", async () => {
     const drawImage = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({

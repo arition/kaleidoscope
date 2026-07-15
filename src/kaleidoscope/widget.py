@@ -65,11 +65,14 @@ class PreviewWidget(anywidget.AnyWidget):
         self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
             "awaiting_ready"
         )
+        self._close_completed = False
         self._delivered_frames: dict[tuple[int, int], int] = {}
         self.on_msg(self._handle_custom_message)
 
     def _reject_frontend_message(self, error: ProtocolError) -> None:
         with self._state_lock:
+            if self._close_completed:
+                return
             self._frontend_state = "terminal"
             self.set_trait("status", "error")
             self.set_trait("playing", False)
@@ -202,16 +205,23 @@ class PreviewWidget(anywidget.AnyWidget):
                 return
             if message["type"] == "ack_frame_set":
                 identity = (message["request_id"], message["generation"])
-                delivered_frame = self._delivered_frames.pop(identity, None)
-                if message["outcome"] == "painted" and delivered_frame is not None:
-                    self.set_trait("current_frame", delivered_frame)
+                with self._state_lock:
+                    delivered_frame = self._delivered_frames.pop(identity, None)
+                    if (
+                        message["outcome"] == "painted"
+                        and delivered_frame is not None
+                        and not self._close_completed
+                    ):
+                        self.set_trait("current_frame", delivered_frame)
                 frame = self._session.ack_frame_set(
                     request_id=message["request_id"],
                     generation=message["generation"],
                     outcome=message["outcome"],
                 )
                 if message["outcome"] == "painted" and delivered_frame is None:
-                    self.set_trait("current_frame", frame)
+                    with self._state_lock:
+                        if not self._close_completed:
+                            self.set_trait("current_frame", frame)
                 return
             if (
                 self._view_active_clip_ids
@@ -311,6 +321,9 @@ class PreviewWidget(anywidget.AnyWidget):
 
     def close(self) -> None:
         with self._state_lock:
+            if self._close_completed:
+                return
+            self._close_completed = True
             self._frontend_state = "terminal"
             self.set_trait("status", "closed")
             self.set_trait("playing", False)

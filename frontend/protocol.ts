@@ -105,13 +105,26 @@ export interface ErrorMessage {
   protocol: typeof PROTOCOL_VERSION;
   type: "error";
   session_id: string;
-  code: string;
+  code: BackendErrorCode;
   message: string;
   recoverable: boolean;
   request_id?: number;
   generation?: number;
   clip_id?: ClipId;
 }
+
+export type BackendErrorCode =
+  | "invalid_message"
+  | "protocol_mismatch"
+  | "unsupported_codec"
+  | "invalid_clip"
+  | "unsupported_dimensions"
+  | "render_failed"
+  | "conversion_failed"
+  | "encode_failed"
+  | "decode_failed"
+  | "kernel_disconnected"
+  | "session_closed";
 
 export interface FrameManifest {
   clip_id: ClipId;
@@ -181,6 +194,32 @@ function isComparisonMode(value: unknown): value is ComparisonMode {
     value === "wipe" ||
     value === "overlay" ||
     value === "difference"
+  );
+}
+
+function isBackendErrorCode(value: unknown): value is BackendErrorCode {
+  return (
+    value === "invalid_message" ||
+    value === "protocol_mismatch" ||
+    value === "unsupported_codec" ||
+    value === "invalid_clip" ||
+    value === "unsupported_dimensions" ||
+    value === "render_failed" ||
+    value === "conversion_failed" ||
+    value === "encode_failed" ||
+    value === "decode_failed" ||
+    value === "kernel_disconnected" ||
+    value === "session_closed"
+  );
+}
+
+function isRuntimeClipErrorCode(
+  value: BackendErrorCode,
+): value is "render_failed" | "conversion_failed" | "encode_failed" {
+  return (
+    value === "render_failed" ||
+    value === "conversion_failed" ||
+    value === "encode_failed"
   );
 }
 
@@ -464,8 +503,7 @@ export function parseBackendMessage(value: unknown): BackendMessage {
     value.type === "error" &&
     typeof value.session_id === "string" &&
     value.session_id.length > 0 &&
-    typeof value.code === "string" &&
-    value.code.length > 0 &&
+    isBackendErrorCode(value.code) &&
     typeof value.message === "string" &&
     typeof value.recoverable === "boolean"
   ) {
@@ -480,6 +518,16 @@ export function parseBackendMessage(value: unknown): BackendMessage {
       throw new ProtocolError(
         "invalid_message",
         "Malformed backend error context.",
+      );
+    }
+    const runtimeClipError = isRuntimeClipErrorCode(value.code);
+    if (
+      (runtimeClipError && (!value.recoverable || !hasRequestContext)) ||
+      (!runtimeClipError && (value.recoverable || hasRequestContext))
+    ) {
+      throw new ProtocolError(
+        "invalid_message",
+        "Backend error semantics do not match the error code.",
       );
     }
     return value as unknown as ErrorMessage;

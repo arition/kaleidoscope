@@ -156,7 +156,7 @@ class PreviewSession:
         *,
         request: _FrameSetRequest,
         clip_id: ClipId,
-        code: str,
+        code: Literal["render_failed", "conversion_failed", "encode_failed"],
         message: str,
     ) -> None:
         with self._delivery_lock:
@@ -176,7 +176,9 @@ class PreviewSession:
             self._send(outbound, [])
 
     @staticmethod
-    def _render_error(clip: NormalizedClip) -> tuple[str, str]:
+    def _render_error(
+        clip: NormalizedClip,
+    ) -> tuple[Literal["conversion_failed", "render_failed"], str]:
         if clip.source_format != "RGB24":
             return (
                 "conversion_failed",

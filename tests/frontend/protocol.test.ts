@@ -495,6 +495,48 @@ describe("protocol v1", () => {
     ).toThrowError(ProtocolError);
   });
 
+  it("rejects backend errors outside the stable error-code vocabulary", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "error",
+        session_id: "session-1",
+        code: "unexpected_failure",
+        message: "Unexpected failure.",
+        recoverable: false,
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects runtime error codes without recoverable clip context", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "error",
+        session_id: "session-1",
+        code: "render_failed",
+        message: "The preview frame could not be rendered.",
+        recoverable: false,
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
+  it("rejects terminal error codes with recoverable clip context", () => {
+    expect(() =>
+      parseBackendMessage({
+        protocol: 1,
+        type: "error",
+        session_id: "session-1",
+        request_id: 7,
+        generation: 2,
+        clip_id: "Filtered",
+        code: "session_closed",
+        message: "The preview session is closed.",
+        recoverable: true,
+      }),
+    ).toThrowError(ProtocolError);
+  });
+
   it("rejects binary payloads whose byte length differs from the manifest", () => {
     const message = parseBackendMessage({
       protocol: 1,
