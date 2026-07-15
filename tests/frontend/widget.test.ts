@@ -126,4 +126,50 @@ describe("widget render", () => {
 
     expect(model.order).toContain("off:msg:custom");
   });
+
+  it("stops paused navigation when the view is aborted", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 64,
+          source_height: 48,
+          output_width: 64,
+          output_height: 48,
+          warnings: [],
+        },
+      ],
+    });
+    controller.abort();
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
+
+    const requests = model.sent.filter(
+      (message) =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+    expect(requests).toHaveLength(1);
+  });
 });

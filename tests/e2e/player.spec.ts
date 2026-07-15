@@ -181,3 +181,114 @@ test("atomic side-by-side paints a labeled frame set", async ({ page }) => {
   expect(pixels[1][2]).toBeGreaterThan(190);
   expect(browserErrors).toEqual([]);
 });
+
+test("rapid seek keeps the latest exact paused frame", async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      browserErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+
+  await page.goto("/tests/e2e/harness/?rapid-seek=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  const frameInput = page.getByLabel("Current frame");
+  await frameInput.fill("2");
+  await frameInput.press("Enter");
+  await frameInput.fill("7");
+  await frameInput.press("Enter");
+
+  await expect(page.getByRole("status").last()).toHaveText("Frame 7 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 7" })).toBeVisible();
+
+  await page.waitForTimeout(180);
+  await expect(page.getByRole("status").last()).toHaveText("Frame 7 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 7" })).toBeVisible();
+
+  const requests = await page.evaluate(() => {
+    return (
+      window as typeof window & { __kaleidoscopeMessages: unknown[] }
+    ).__kaleidoscopeMessages.filter(
+      (message) =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+  });
+  expect(requests).toMatchObject([
+    { request_id: 0, generation: 0, frame: 0 },
+    { request_id: 1, generation: 1, frame: 2 },
+    { request_id: 2, generation: 2, frame: 7 },
+  ]);
+  expect(browserErrors).toEqual([]);
+});
+
+test("paused navigation reaches exact first middle and last frames", async ({
+  page,
+}) => {
+  await page.goto("/tests/e2e/harness/?rapid-seek=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  const frameInput = page.getByLabel("Current frame");
+  await frameInput.fill("5");
+  await frameInput.press("Enter");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 5 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 5" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Last frame" }).click();
+  await expect(page.getByRole("status").last()).toHaveText("Frame 9 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 9" })).toBeVisible();
+
+  await page.getByRole("button", { name: "First frame" }).click();
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+  await expect(page.getByRole("img", { name: "Source, frame 0" })).toBeVisible();
+
+  const requestFrames = await page.evaluate(() => {
+    return (
+      window as typeof window & { __kaleidoscopeMessages: unknown[] }
+    ).__kaleidoscopeMessages
+      .filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "request_frame_set",
+      )
+      .map((message) => (message as { frame: number }).frame);
+  });
+  expect(requestFrames).toEqual([0, 5, 9, 0]);
+});
+
+test("paused navigation controls fit a narrow notebook", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/tests/e2e/harness/?rapid-seek=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  const geometry = await page.evaluate(() => {
+    const widget = document.querySelector<HTMLElement>(".kaleidoscope-widget");
+    const seek = document.querySelector<HTMLInputElement>(".kaleidoscope-seek");
+    const frame = document.querySelector<HTMLInputElement>(
+      ".kaleidoscope-frame-input",
+    );
+    const time = document.querySelector<HTMLInputElement>(
+      ".kaleidoscope-time-input",
+    );
+    if (widget === null || seek === null || frame === null || time === null) {
+      throw new Error("Paused navigation controls are unavailable.");
+    }
+    return {
+      overflow: widget.scrollWidth - widget.clientWidth,
+      seekWidth: seek.getBoundingClientRect().width,
+      frameWidth: frame.getBoundingClientRect().width,
+      timeWidth: time.getBoundingClientRect().width,
+    };
+  });
+
+  expect(geometry.overflow).toBeLessThanOrEqual(0);
+  expect(geometry.seekWidth).toBeGreaterThanOrEqual(96);
+  expect(geometry.frameWidth).toBeGreaterThanOrEqual(72);
+  expect(geometry.timeWidth).toBeGreaterThanOrEqual(112);
+});

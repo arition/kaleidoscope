@@ -145,6 +145,96 @@ function parseBackendMessage(value) {
   throw new ProtocolError("invalid_message", "Malformed backend message.");
 }
 
+// frontend/time.ts
+var MAX_TIME_INPUT_LENGTH = 32;
+function clampFrame(frame, numFrames) {
+  if (frame <= 0n) {
+    return 0;
+  }
+  const lastFrame = BigInt(numFrames - 1);
+  return Number(frame >= lastFrame ? lastFrame : frame);
+}
+function floorDivide(numerator, denominator) {
+  const quotient = numerator / denominator;
+  return numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
+}
+function frameFromScaledSeconds(numerator, denominator, fpsNum, fpsDen, numFrames) {
+  const frame = floorDivide(
+    numerator * BigInt(fpsNum),
+    denominator * BigInt(fpsDen)
+  );
+  return clampFrame(frame, numFrames);
+}
+function decimalScale(fraction) {
+  return 10n ** BigInt(fraction.length);
+}
+function parseScaledSeconds(value) {
+  if (value.length > MAX_TIME_INPUT_LENGTH) {
+    return void 0;
+  }
+  const trimmed = value.trim();
+  const clockMatch = /^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(trimmed);
+  if (clockMatch !== null) {
+    const [, hoursText, minutesText, secondsText, fractionText2 = ""] = clockMatch;
+    const minutes = Number(minutesText);
+    const seconds = Number(secondsText);
+    if (minutes >= 60 || seconds >= 60) {
+      return void 0;
+    }
+    const denominator2 = decimalScale(fractionText2);
+    const wholeSeconds = (BigInt(hoursText) * 60n + BigInt(minutes)) * 60n + BigInt(seconds);
+    return {
+      numerator: wholeSeconds * denominator2 + BigInt(fractionText2 === "" ? "0" : fractionText2),
+      denominator: denominator2
+    };
+  }
+  const decimalMatch = /^(-?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (decimalMatch === null) {
+    return void 0;
+  }
+  const [, sign, wholeText, fractionText = ""] = decimalMatch;
+  const denominator = decimalScale(fractionText);
+  const magnitude = BigInt(wholeText) * denominator + BigInt(fractionText === "" ? "0" : fractionText);
+  return {
+    numerator: sign === "-" ? -magnitude : magnitude,
+    denominator
+  };
+}
+function parseTimeToFrame(value, fpsNum, fpsDen, numFrames) {
+  const time = parseScaledSeconds(value);
+  return time === void 0 ? void 0 : frameFromScaledSeconds(
+    time.numerator,
+    time.denominator,
+    fpsNum,
+    fpsDen,
+    numFrames
+  );
+}
+function offsetFrameBySeconds(frame, seconds, fpsNum, fpsDen, numFrames) {
+  const frameOffset = floorDivide(
+    BigInt(Math.trunc(seconds)) * BigInt(fpsNum),
+    BigInt(fpsDen)
+  );
+  return clampFrame(BigInt(frame) + frameOffset, numFrames);
+}
+function formatFrameTime(frame, fpsNum, fpsDen) {
+  let precision = 3;
+  let scale = 1000n;
+  while (scale * BigInt(fpsDen) < BigInt(fpsNum)) {
+    precision += 1;
+    scale *= 10n;
+  }
+  const numerator = BigInt(frame) * BigInt(fpsDen) * scale;
+  const denominator = BigInt(fpsNum);
+  const ticks = (numerator + denominator - 1n) / denominator;
+  const totalSeconds = ticks / scale;
+  const hours = totalSeconds / 3600n;
+  const minutes = totalSeconds % 3600n / 60n;
+  const seconds = totalSeconds % 60n;
+  const fraction = ticks % scale;
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${fraction.toString().padStart(precision, "0")}`;
+}
+
 // frontend/player.ts
 function idsMatch(left, right) {
   return left === right;
@@ -198,7 +288,7 @@ function createClipRow(clip, activeClipIds, canvases) {
   }
   return row;
 }
-function renderMetadata(root, message) {
+function renderMetadata(root, message, navigation, signal) {
   const canvases = /* @__PURE__ */ new Map();
   const header = document.createElement("header");
   header.className = "kaleidoscope-header";
@@ -213,6 +303,179 @@ function renderMetadata(root, message) {
   timeline.className = "kaleidoscope-timeline";
   timeline.setAttribute("aria-label", "Shared clip timeline");
   timeline.textContent = `${message.num_frames} frames | ${message.fps_num}/${message.fps_den} fps`;
+  const controls = document.createElement("div");
+  controls.className = "kaleidoscope-controls";
+  controls.setAttribute("role", "group");
+  controls.setAttribute("aria-label", "Paused navigation");
+  const createNavigationButton = (label, text, target) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "kaleidoscope-control-button";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.textContent = text;
+    button.disabled = navigation === void 0;
+    button.addEventListener("click", () => requestExact(target()), { signal });
+    return button;
+  };
+  const seek = document.createElement("input");
+  seek.type = "range";
+  seek.className = "kaleidoscope-seek";
+  seek.min = "0";
+  seek.max = String(message.num_frames - 1);
+  seek.step = "1";
+  seek.value = "0";
+  seek.setAttribute("aria-label", "Seek frame");
+  seek.disabled = navigation === void 0;
+  const frame = document.createElement("input");
+  frame.type = "number";
+  frame.className = "kaleidoscope-frame-input";
+  frame.min = "0";
+  frame.max = String(message.num_frames - 1);
+  frame.step = "1";
+  frame.value = "0";
+  frame.setAttribute("aria-label", "Current frame");
+  frame.disabled = navigation === void 0;
+  const totalFrames = document.createElement("span");
+  totalFrames.className = "kaleidoscope-frame-total";
+  totalFrames.textContent = `/ ${message.num_frames - 1}`;
+  const time = document.createElement("input");
+  time.type = "text";
+  time.className = "kaleidoscope-time-input";
+  time.inputMode = "decimal";
+  time.maxLength = MAX_TIME_INPUT_LENGTH;
+  time.value = formatFrameTime(0, message.fps_num, message.fps_den);
+  time.setAttribute("aria-label", "Current time");
+  time.disabled = navigation === void 0;
+  const duration = document.createElement("span");
+  duration.className = "kaleidoscope-duration";
+  duration.textContent = `/ ${formatFrameTime(
+    message.num_frames,
+    message.fps_num,
+    message.fps_den
+  )}`;
+  let currentFrame = 0;
+  const updateFrame = (target) => {
+    currentFrame = target;
+    seek.value = String(target);
+    frame.value = String(target);
+    time.value = formatFrameTime(target, message.fps_num, message.fps_den);
+  };
+  const requestExact = (target) => {
+    if (navigation !== void 0) {
+      updateFrame(navigation.requestExact(target));
+    }
+  };
+  const first = createNavigationButton("First frame", "|<", () => 0);
+  const previous = createNavigationButton(
+    "Previous frame",
+    "<",
+    () => currentFrame - 1
+  );
+  const next = createNavigationButton(
+    "Next frame",
+    ">",
+    () => currentFrame + 1
+  );
+  const last = createNavigationButton(
+    "Last frame",
+    ">|",
+    () => message.num_frames - 1
+  );
+  seek.addEventListener(
+    "input",
+    () => {
+      if (navigation !== void 0) {
+        updateFrame(navigation.scheduleScrub(Number(seek.value)));
+      }
+    },
+    { signal }
+  );
+  seek.addEventListener("change", () => requestExact(Number(seek.value)), {
+    signal
+  });
+  frame.addEventListener(
+    "change",
+    () => {
+      if (frame.value.trim() === "") {
+        updateFrame(currentFrame);
+        return;
+      }
+      requestExact(Number(frame.value));
+    },
+    { signal }
+  );
+  time.addEventListener(
+    "change",
+    () => {
+      const target = parseTimeToFrame(
+        time.value,
+        message.fps_num,
+        message.fps_den,
+        message.num_frames
+      );
+      if (target === void 0) {
+        updateFrame(currentFrame);
+        return;
+      }
+      requestExact(target);
+    },
+    { signal }
+  );
+  controls.append(
+    first,
+    previous,
+    seek,
+    next,
+    last,
+    frame,
+    totalFrames,
+    time,
+    duration
+  );
+  root.tabIndex = 0;
+  root.addEventListener(
+    "keydown",
+    (event) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLElement && target.isContentEditable) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        requestExact(
+          event.shiftKey ? offsetFrameBySeconds(
+            currentFrame,
+            -1,
+            message.fps_num,
+            message.fps_den,
+            message.num_frames
+          ) : currentFrame - 1
+        );
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        requestExact(
+          event.shiftKey ? offsetFrameBySeconds(
+            currentFrame,
+            1,
+            message.fps_num,
+            message.fps_den,
+            message.num_frames
+          ) : currentFrame + 1
+        );
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        requestExact(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        requestExact(message.num_frames - 1);
+      }
+    },
+    { signal }
+  );
   const clips = document.createElement("ul");
   clips.className = "kaleidoscope-clips";
   clips.dataset.mode = message.mode;
@@ -227,7 +490,7 @@ function renderMetadata(root, message) {
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
-  root.replaceChildren(header, timeline, clips, status);
+  root.replaceChildren(header, timeline, controls, clips, status);
   return { metadata: message, canvases };
 }
 async function decodeFrames(message, buffers) {
@@ -334,6 +597,101 @@ async function paintFrameSet(view, message, buffers, shouldCommit) {
   }
 }
 
+// frontend/scheduler.ts
+var scheduleFrame = (callback) => {
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    return globalThis.requestAnimationFrame(callback);
+  }
+  return globalThis.setTimeout(() => callback(performance.now()), 0);
+};
+var cancelFrame = (handle) => {
+  if (typeof globalThis.cancelAnimationFrame === "function") {
+    globalThis.cancelAnimationFrame(handle);
+  } else {
+    globalThis.clearTimeout(handle);
+  }
+};
+var PausedSeekScheduler = class {
+  sessionId;
+  numFrames;
+  clipIds;
+  send;
+  schedule;
+  cancel;
+  nextRequestId = 0;
+  nextGeneration = 0;
+  scheduledHandle;
+  scheduledToken = 0;
+  pendingFrame = 0;
+  closed = false;
+  constructor(options) {
+    this.sessionId = options.sessionId;
+    this.numFrames = options.numFrames;
+    this.clipIds = [...options.clipIds];
+    this.send = options.send;
+    this.schedule = options.schedule ?? scheduleFrame;
+    this.cancel = options.cancel ?? cancelFrame;
+  }
+  clamp(frame) {
+    if (!Number.isFinite(frame)) {
+      return frame < 0 ? 0 : this.numFrames - 1;
+    }
+    return Math.min(this.numFrames - 1, Math.max(0, Math.trunc(frame)));
+  }
+  cancelScheduledScrub() {
+    this.scheduledToken += 1;
+    if (this.scheduledHandle !== void 0) {
+      this.cancel(this.scheduledHandle);
+      this.scheduledHandle = void 0;
+    }
+  }
+  requestExact(frame) {
+    this.cancelScheduledScrub();
+    const identity = {
+      request_id: this.nextRequestId,
+      generation: this.nextGeneration,
+      frame: this.clamp(frame)
+    };
+    if (this.closed) {
+      return identity;
+    }
+    this.nextRequestId += 1;
+    this.nextGeneration += 1;
+    this.send(
+      createFrameSetRequest(
+        this.sessionId,
+        identity.request_id,
+        identity.generation,
+        identity.frame,
+        this.clipIds,
+        "seek"
+      )
+    );
+    return identity;
+  }
+  scheduleScrub(frame) {
+    this.pendingFrame = this.clamp(frame);
+    if (!this.closed && this.scheduledHandle === void 0) {
+      const token = this.scheduledToken;
+      this.scheduledHandle = this.schedule(() => {
+        if (token !== this.scheduledToken) {
+          return;
+        }
+        this.scheduledHandle = void 0;
+        this.requestExact(this.pendingFrame);
+      });
+    }
+    return this.pendingFrame;
+  }
+  close() {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.cancelScheduledScrub();
+  }
+};
+
 // frontend/index.ts
 function createStatus(text) {
   const status = document.createElement("div");
@@ -406,6 +764,7 @@ function render({ model, el, signal }) {
   }
   let metadata;
   let playerView;
+  let seekScheduler;
   let currentRequest;
   const updateStatus = (text) => {
     const liveStatus = el.querySelector("[role='status']");
@@ -422,25 +781,34 @@ function render({ model, el, signal }) {
       if (message.type === "metadata") {
         if ("clips" in message) {
           metadata = message;
-          playerView = renderMetadata(el, message);
-          currentRequest = { request_id: 0, generation: 0, frame: 0 };
-          model.send(
-            createFrameSetRequest(
-              sessionId,
-              currentRequest.request_id,
-              currentRequest.generation,
-              currentRequest.frame,
-              message.active_clip_ids,
-              "seek"
-            )
+          seekScheduler = new PausedSeekScheduler({
+            sessionId,
+            numFrames: message.num_frames,
+            clipIds: message.active_clip_ids,
+            send: (request) => {
+              currentRequest = request;
+              model.send(request);
+            }
+          });
+          playerView = renderMetadata(
+            el,
+            message,
+            {
+              requestExact: (frame) => seekScheduler?.requestExact(frame).frame ?? 0,
+              scheduleScrub: (frame) => {
+                currentRequest = void 0;
+                return seekScheduler?.scheduleScrub(frame) ?? 0;
+              }
+            },
+            signal
           );
+          seekScheduler.requestExact(0);
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
         return;
       }
       if (message.type === "frame_set") {
-        validateFrameSetBuffers(message, buffers);
         if (metadata === void 0 || playerView === void 0) {
           throw new ProtocolError(
             "invalid_message",
@@ -456,12 +824,21 @@ function render({ model, el, signal }) {
         if (!isCurrent()) {
           return;
         }
-        const painted = await paintFrameSet(
-          playerView,
-          message,
-          buffers,
-          isCurrent
-        );
+        let painted;
+        try {
+          validateFrameSetBuffers(message, buffers);
+          painted = await paintFrameSet(
+            playerView,
+            message,
+            buffers,
+            isCurrent
+          );
+        } catch (error) {
+          if (!isCurrent()) {
+            return;
+          }
+          throw error;
+        }
         if (painted) {
           updateStatus(`Frame ${message.frame} ready.`);
         }
@@ -485,9 +862,14 @@ function render({ model, el, signal }) {
     void handleMessage(value, buffers);
   };
   model.on("msg:custom", onMessage);
-  signal.addEventListener("abort", () => model.off("msg:custom", onMessage), {
-    once: true
-  });
+  signal.addEventListener(
+    "abort",
+    () => {
+      seekScheduler?.close();
+      model.off("msg:custom", onMessage);
+    },
+    { once: true }
+  );
   const imageBitmap = typeof globalThis.createImageBitmap === "function";
   if (!imageBitmap) {
     model.send(

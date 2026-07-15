@@ -4,10 +4,21 @@ import type {
   FrameSetMessage,
   PreviewMetadataMessage,
 } from "./protocol.js";
+import {
+  formatFrameTime,
+  MAX_TIME_INPUT_LENGTH,
+  offsetFrameBySeconds,
+  parseTimeToFrame,
+} from "./time.js";
 
 export interface PlayerView {
   readonly metadata: PreviewMetadataMessage;
   readonly canvases: Map<ClipId, HTMLCanvasElement>;
+}
+
+export interface PlayerNavigation {
+  requestExact(frame: number): number;
+  scheduleScrub(frame: number): number;
 }
 
 function idsMatch(left: ClipId, right: ClipId): boolean {
@@ -80,6 +91,8 @@ function createClipRow(
 export function renderMetadata(
   root: HTMLElement,
   message: PreviewMetadataMessage,
+  navigation?: PlayerNavigation,
+  signal?: AbortSignal,
 ): PlayerView {
   const canvases = new Map<ClipId, HTMLCanvasElement>();
   const header = document.createElement("header");
@@ -100,6 +113,204 @@ export function renderMetadata(
   timeline.setAttribute("aria-label", "Shared clip timeline");
   timeline.textContent = `${message.num_frames} frames | ${message.fps_num}/${message.fps_den} fps`;
 
+  const controls = document.createElement("div");
+  controls.className = "kaleidoscope-controls";
+  controls.setAttribute("role", "group");
+  controls.setAttribute("aria-label", "Paused navigation");
+
+  const createNavigationButton = (
+    label: string,
+    text: string,
+    target: () => number,
+  ): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "kaleidoscope-control-button";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.textContent = text;
+    button.disabled = navigation === undefined;
+    button.addEventListener("click", () => requestExact(target()), { signal });
+    return button;
+  };
+
+  const seek = document.createElement("input");
+  seek.type = "range";
+  seek.className = "kaleidoscope-seek";
+  seek.min = "0";
+  seek.max = String(message.num_frames - 1);
+  seek.step = "1";
+  seek.value = "0";
+  seek.setAttribute("aria-label", "Seek frame");
+  seek.disabled = navigation === undefined;
+
+  const frame = document.createElement("input");
+  frame.type = "number";
+  frame.className = "kaleidoscope-frame-input";
+  frame.min = "0";
+  frame.max = String(message.num_frames - 1);
+  frame.step = "1";
+  frame.value = "0";
+  frame.setAttribute("aria-label", "Current frame");
+  frame.disabled = navigation === undefined;
+
+  const totalFrames = document.createElement("span");
+  totalFrames.className = "kaleidoscope-frame-total";
+  totalFrames.textContent = `/ ${message.num_frames - 1}`;
+
+  const time = document.createElement("input");
+  time.type = "text";
+  time.className = "kaleidoscope-time-input";
+  time.inputMode = "decimal";
+  time.maxLength = MAX_TIME_INPUT_LENGTH;
+  time.value = formatFrameTime(0, message.fps_num, message.fps_den);
+  time.setAttribute("aria-label", "Current time");
+  time.disabled = navigation === undefined;
+
+  const duration = document.createElement("span");
+  duration.className = "kaleidoscope-duration";
+  duration.textContent = `/ ${formatFrameTime(
+    message.num_frames,
+    message.fps_num,
+    message.fps_den,
+  )}`;
+
+  let currentFrame = 0;
+  const updateFrame = (target: number): void => {
+    currentFrame = target;
+    seek.value = String(target);
+    frame.value = String(target);
+    time.value = formatFrameTime(target, message.fps_num, message.fps_den);
+  };
+  const requestExact = (target: number): void => {
+    if (navigation !== undefined) {
+      updateFrame(navigation.requestExact(target));
+    }
+  };
+
+  const first = createNavigationButton("First frame", "|<", () => 0);
+  const previous = createNavigationButton(
+    "Previous frame",
+    "<",
+    () => currentFrame - 1,
+  );
+  const next = createNavigationButton(
+    "Next frame",
+    ">",
+    () => currentFrame + 1,
+  );
+  const last = createNavigationButton(
+    "Last frame",
+    ">|",
+    () => message.num_frames - 1,
+  );
+
+  seek.addEventListener(
+    "input",
+    () => {
+      if (navigation !== undefined) {
+        updateFrame(navigation.scheduleScrub(Number(seek.value)));
+      }
+    },
+    { signal },
+  );
+  seek.addEventListener("change", () => requestExact(Number(seek.value)), {
+    signal,
+  });
+  frame.addEventListener(
+    "change",
+    () => {
+      if (frame.value.trim() === "") {
+        updateFrame(currentFrame);
+        return;
+      }
+      requestExact(Number(frame.value));
+    },
+    { signal },
+  );
+  time.addEventListener(
+    "change",
+    () => {
+      const target = parseTimeToFrame(
+        time.value,
+        message.fps_num,
+        message.fps_den,
+        message.num_frames,
+      );
+      if (target === undefined) {
+        updateFrame(currentFrame);
+        return;
+      }
+      requestExact(target);
+    },
+    { signal },
+  );
+
+  controls.append(
+    first,
+    previous,
+    seek,
+    next,
+    last,
+    frame,
+    totalFrames,
+    time,
+    duration,
+  );
+
+  root.tabIndex = 0;
+  root.addEventListener(
+    "keydown",
+    (event) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        requestExact(
+          event.shiftKey
+            ? offsetFrameBySeconds(
+                currentFrame,
+                -1,
+                message.fps_num,
+                message.fps_den,
+                message.num_frames,
+              )
+            : currentFrame - 1,
+        );
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        requestExact(
+          event.shiftKey
+            ? offsetFrameBySeconds(
+                currentFrame,
+                1,
+                message.fps_num,
+                message.fps_den,
+                message.num_frames,
+              )
+            : currentFrame + 1,
+        );
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        requestExact(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        requestExact(message.num_frames - 1);
+      }
+    },
+    { signal },
+  );
+
   const clips = document.createElement("ul");
   clips.className = "kaleidoscope-clips";
   clips.dataset.mode = message.mode;
@@ -116,7 +327,7 @@ export function renderMetadata(
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
 
-  root.replaceChildren(header, timeline, clips, status);
+  root.replaceChildren(header, timeline, controls, clips, status);
   return { metadata: message, canvases };
 }
 

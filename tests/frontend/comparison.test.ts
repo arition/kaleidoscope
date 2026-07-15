@@ -235,6 +235,118 @@ describe("atomic comparison painting", () => {
     );
   });
 
+  it("invalidates the current paint as soon as the scrub target changes", async () => {
+    let scheduled: FrameRequestCallback | undefined;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        scheduled = callback;
+        return 17;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    const createImageBitmap = vi
+      .fn()
+      .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap);
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    createImageBitmap.mockClear();
+    model.emit(metadata);
+
+    const seek = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Seek frame']",
+    );
+    expect(seek).not.toBeNull();
+    if (seek !== null) {
+      seek.value = "1";
+      seek.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    model.emit(frameSet(0), payloads());
+    await Promise.resolve();
+
+    expect(createImageBitmap).not.toHaveBeenCalled();
+    expect(drawImage).not.toHaveBeenCalled();
+
+    scheduled?.(0);
+    const requests = model.sent.filter(
+      (message): message is Record<string, unknown> =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+    expect(requests.map(({ frame, generation }) => ({ frame, generation }))).toEqual([
+      { frame: 0, generation: 0 },
+      { frame: 1, generation: 1 },
+    ]);
+  });
+
+  it("ignores a stale decode failure after a newer frame paints", async () => {
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+
+    let rejectStaleDecode: (error: Error) => void = () => {};
+    const staleDecode = new Promise<ImageBitmap>((_resolve, reject) => {
+      rejectStaleDecode = reject;
+    });
+    const staleClose = vi.fn();
+    const currentClose = vi.fn();
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ close: vi.fn() } as unknown as ImageBitmap)
+        .mockReturnValueOnce(staleDecode)
+        .mockResolvedValueOnce({ close: staleClose } as unknown as ImageBitmap)
+        .mockResolvedValue({ close: currentClose } as unknown as ImageBitmap),
+    );
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    model.emit(metadata);
+    model.emit(frameSet(0), payloads());
+
+    const frame = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current frame']",
+    );
+    expect(frame).not.toBeNull();
+    if (frame !== null) {
+      frame.value = "1";
+      frame.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    model.emit({ ...frameSet(1), generation: 1 }, payloads());
+
+    await vi.waitFor(() =>
+      expect(element.querySelector("[role='status']")?.textContent).toBe(
+        "Frame 1 ready.",
+      ),
+    );
+    rejectStaleDecode(new Error("stale decode failed"));
+    await vi.waitFor(() => expect(staleClose).toHaveBeenCalledOnce());
+
+    expect(element.querySelector("[role='status']")?.textContent).toBe(
+      "Frame 1 ready.",
+    );
+    expect(drawImage).toHaveBeenCalledTimes(2);
+    expect(currentClose).toHaveBeenCalledTimes(2);
+  });
+
   it("identifies the failed clip without replacing the complete set", async () => {
     const drawImage = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({

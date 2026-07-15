@@ -373,6 +373,124 @@ def test_stale_frame_set_members_close_without_sending() -> None:
     assert len(buffers) == 2
 
 
+@pytest.mark.parametrize("target", [0, 5, 9])
+def test_frame_set_requests_exact_boundary_and_middle_frames(target: int) -> None:
+    source_node = FakeVideoNode()
+    filtered_node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(source_node, ("Filtered", filtered_node)),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=target,
+        generation=target,
+        frame=target,
+        clip_ids=("Source", "Filtered"),
+    )
+
+    assert source_node.requested == [target]
+    assert filtered_node.requested == [target]
+
+    source_node.future.set_result(FakeFrame())
+    filtered_node.future.set_result(FakeFrame())
+
+    assert len(sent) == 1
+    assert sent[0][0]["frame"] == target
+
+
+@pytest.mark.parametrize(
+    ("request_id", "generation"),
+    [(2, 2), (1, 3), (3, 1)],
+)
+def test_session_rejects_non_monotonic_request_identities_without_replacing_work(
+    request_id: int,
+    generation: int,
+) -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+    session.request_frame_set(
+        request_id=2,
+        generation=2,
+        frame=2,
+        clip_ids=("Source",),
+    )
+
+    with pytest.raises(ValueError, match="monotonically"):
+        session.request_frame_set(
+            request_id=request_id,
+            generation=generation,
+            frame=3,
+            clip_ids=("Source",),
+        )
+
+    node.future.set_result(FakeFrame())
+
+    assert len(sent) == 1
+    assert sent[0][0]["request_id"] == 2
+    assert sent[0][0]["generation"] == 2
+    assert sent[0][0]["frame"] == 2
+
+
+def test_session_accepts_increasing_request_id_with_same_generation() -> None:
+    node = FakeVideoNode()
+    old_future = node.future
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+    session.request_frame_set(
+        request_id=2,
+        generation=2,
+        frame=2,
+        clip_ids=("Source",),
+    )
+    node.future = Future()
+    session.request_frame_set(
+        request_id=3,
+        generation=2,
+        frame=3,
+        clip_ids=("Source",),
+    )
+
+    old_frame = FakeFrame()
+    old_future.set_result(old_frame)
+    assert old_frame.closed is True
+    assert sent == []
+
+    current_frame = FakeFrame()
+    node.future.set_result(current_frame)
+    assert current_frame.closed is True
+    assert len(sent) == 1
+    assert sent[0][0]["request_id"] == 3
+    assert sent[0][0]["generation"] == 2
+    assert sent[0][0]["frame"] == 3
+
+
 def test_frame_set_rejects_duplicate_and_unknown_clip_ids() -> None:
     source_node = FakeVideoNode()
     filtered_node = FakeVideoNode()

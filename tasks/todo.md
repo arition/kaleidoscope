@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T7 is the next implementation task
+Status: G1 approved; T7 complete; T8 and T9 are next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.5 approved
 
@@ -61,11 +61,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Record render-through-paint percentiles, bytes, CPU, lag, and drops.
   - [x] Publish the decision and stop at G1 before continuing.
 
-- [ ] **T7 - Exact paused navigation** (depends on T6 and G1 passing)
-  - [ ] Add timeline, frame/time entry, stepping, and first/last controls.
-  - [ ] Implement rational frame/time conversion and clamping.
-  - [ ] Coalesce scrubs with latest-generation-wins behavior.
-  - [ ] Prove exact first/middle/last synchronized seeks and no stale overwrite.
+- [x] **T7 - Exact paused navigation** (depends on T6 and G1 passing)
+  - [x] Add timeline, frame/time entry, stepping, and first/last controls.
+  - [x] Implement rational frame/time conversion and clamping.
+  - [x] Coalesce scrubs with latest-generation-wins behavior.
+  - [x] Prove exact first/middle/last synchronized seeks and no stale overwrite.
 
 - [ ] **T8 - Clock-correct bounded playback** (depends on T7)
   - [ ] Add play/pause, autoplay-after-ready, end, restart, and visibility behavior.

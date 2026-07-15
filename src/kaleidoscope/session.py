@@ -66,6 +66,8 @@ class PreviewSession:
         self._lock = Lock()
         self._delivery_lock = RLock()
         self._current_request: _FrameSetRequest | None = None
+        self._last_request_id = -1
+        self._last_generation = -1
         self._scheduler = FrameSetScheduler(config.max_in_flight)
         self._closed = False
 
@@ -206,6 +208,16 @@ class PreviewSession:
             with self._lock:
                 if self._closed:
                     return
+                if (
+                    request_id <= self._last_request_id
+                    or generation < self._last_generation
+                ):
+                    raise ValueError(
+                        "Request IDs must increase monotonically and generations "
+                        "must not decrease."
+                    )
+                self._last_request_id = request_id
+                self._last_generation = generation
                 if self._current_request is not None:
                     self._current_request.completed.clear()
                 self._current_request = request

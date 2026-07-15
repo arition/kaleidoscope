@@ -1,6 +1,6 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T6 complete; G1 approved; Task 7 next
+Status: T1-T7 complete; G1 approved; Tasks T8 and T9 next
 Source: `tasks/spec.md`, revision 0.5 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
@@ -232,19 +232,19 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Frame 0, an arbitrary middle frame, and the last frame resolve exactly for every active clip.
-- [ ] Timeline drag updates optimistic frame/time text immediately and temporarily pauses playback intent.
-- [ ] Slider release, numeric frame entry, and time entry request the exact clamped target.
-- [ ] Previous/next and Home/End controls work while paused and have scoped keyboard equivalents.
-- [ ] Rational FPS conversion avoids float-boundary errors.
-- [ ] Scrub requests are coalesced latest-wins; obsolete generations never overwrite the final target.
-- [ ] Paused seeks never substitute a neighboring frame.
+- [x] Frame 0, an arbitrary middle frame, and the last frame resolve exactly for every active clip.
+- [x] Timeline drag updates optimistic frame/time text immediately and temporarily pauses playback intent.
+- [x] Slider release, numeric frame entry, and time entry request the exact clamped target.
+- [x] Previous/next and Home/End controls work while paused and have scoped keyboard equivalents.
+- [x] Rational FPS conversion avoids float-boundary errors.
+- [x] Scrub requests are coalesced latest-wins; obsolete generations never overwrite the final target.
+- [x] Paused seeks never substitute a neighboring frame.
 
 **Verification:**
 
-- [ ] `hatch run test:pytest tests/python/test_scheduler.py tests/python/test_protocol.py -k "seek or generation or coalesce"`
-- [ ] `npm test -- --run tests/frontend/player.test.ts tests/frontend/scheduler.test.ts tests/frontend/time.test.ts`
-- [ ] `npm run test:e2e -- --grep "paused navigation|rapid seek"`
+- [x] `hatch run test:pytest tests/python/test_scheduler.py tests/python/test_protocol.py tests/python/test_session.py -k "seek or generation or coalesce or stale or exact_boundary or non_monotonic"`
+- [x] `npm test -- --run tests/frontend/player.test.ts tests/frontend/scheduler.test.ts tests/frontend/time.test.ts tests/frontend/comparison.test.ts tests/frontend/widget.test.ts`
+- [x] `npm run test:e2e`
 
 ## T8: Clock-Correct Bounded Playback
 

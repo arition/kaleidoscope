@@ -481,4 +481,189 @@ describe("metadata presentation", () => {
     );
     expect(drawImage).not.toHaveBeenCalled();
   });
+
+  it("requests exact paused frames from the visible navigation controls", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 240,
+      fps_num: 24000,
+      fps_den: 1001,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1920,
+          source_height: 1080,
+          output_width: 1920,
+          output_height: 1080,
+          warnings: [],
+        },
+      ],
+    });
+
+    const seek = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Seek frame']",
+    );
+    const frame = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current frame']",
+    );
+    const time = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current time']",
+    );
+    const next = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Next frame']",
+    );
+    const last = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Last frame']",
+    );
+
+    expect(seek?.max).toBe("239");
+    expect(frame?.value).toBe("0");
+    expect(time?.value).toBe("00:00:00.000");
+    expect(time?.maxLength).toBe(32);
+    expect(
+      element.querySelector("[role='group'][aria-label='Paused navigation']"),
+    ).not.toBeNull();
+    expect(element.textContent).toContain("00:00:10.010");
+    expect(next).not.toBeNull();
+    expect(last).not.toBeNull();
+
+    next?.click();
+    expect(frame?.value).toBe("1");
+    expect(time?.value).toBe("00:00:00.042");
+
+    if (frame !== null) {
+      frame.value = "120";
+      frame.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    expect(seek?.value).toBe("120");
+    expect(time?.value).toBe("00:00:05.005");
+
+    if (time !== null) {
+      time.value = "00:00:01.001";
+      time.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    expect(frame?.value).toBe("24");
+
+    last?.click();
+    expect(frame?.value).toBe("239");
+
+    const requests = model.sent.filter(
+      (message): message is Record<string, unknown> =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+    expect(requests.map(({ request_id, generation, frame: target }) => ({
+      request_id,
+      generation,
+      frame: target,
+    }))).toEqual([
+      { request_id: 0, generation: 0, frame: 0 },
+      { request_id: 1, generation: 1, frame: 1 },
+      { request_id: 2, generation: 2, frame: 120 },
+      { request_id: 3, generation: 3, frame: 24 },
+      { request_id: 4, generation: 4, frame: 239 },
+    ]);
+  });
+
+  it("scopes paused navigation keys and uses Shift for one-second seeks", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+
+    render({
+      model,
+      el: element,
+      signal: new AbortController().signal,
+    });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 240,
+      fps_num: 24000,
+      fps_den: 1001,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      max_visible_clips: 4,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1920,
+          source_height: 1080,
+          output_width: 1920,
+          output_height: 1080,
+          warnings: [],
+        },
+      ],
+    });
+
+    const frame = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current frame']",
+    );
+    expect(frame).not.toBeNull();
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
+    expect(frame?.value).toBe("1");
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(frame?.value).toBe("24");
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+    );
+    expect(frame?.value).toBe("239");
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Home", bubbles: true }),
+    );
+    expect(frame?.value).toBe("0");
+
+    frame?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
+    expect(frame?.value).toBe("0");
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+    expect(frame?.value).toBe("0");
+
+    const requests = model.sent.filter(
+      (message): message is Record<string, unknown> =>
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "request_frame_set",
+    );
+    expect(requests.map((request) => request.frame)).toEqual([0, 1, 24, 239, 0]);
+  });
 });

@@ -1,7 +1,6 @@
 import type { RenderProps } from "@anywidget/types";
 
 import {
-  createFrameSetRequest,
   createReadyMessage,
   parseBackendMessage,
   ProtocolError,
@@ -10,6 +9,7 @@ import {
 import type { FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
 import { paintFrameSet, renderMetadata } from "./player.js";
 import type { PlayerView } from "./player.js";
+import { PausedSeekScheduler } from "./scheduler.js";
 import "./styles.css";
 
 function createStatus(text: string): HTMLElement {
@@ -56,6 +56,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
 
   let metadata: PreviewMetadataMessage | undefined;
   let playerView: PlayerView | undefined;
+  let seekScheduler: PausedSeekScheduler | undefined;
   let currentRequest:
     | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
     | undefined;
@@ -79,25 +80,35 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       if (message.type === "metadata") {
         if ("clips" in message) {
           metadata = message;
-          playerView = renderMetadata(el, message);
-          currentRequest = { request_id: 0, generation: 0, frame: 0 };
-          model.send(
-            createFrameSetRequest(
-              sessionId,
-              currentRequest.request_id,
-              currentRequest.generation,
-              currentRequest.frame,
-              message.active_clip_ids,
-              "seek",
-            ),
+          seekScheduler = new PausedSeekScheduler({
+            sessionId,
+            numFrames: message.num_frames,
+            clipIds: message.active_clip_ids,
+            send: (request) => {
+              currentRequest = request;
+              model.send(request);
+            },
+          });
+          playerView = renderMetadata(
+            el,
+            message,
+            {
+              requestExact: (frame) =>
+                seekScheduler?.requestExact(frame).frame ?? 0,
+              scheduleScrub: (frame) => {
+                currentRequest = undefined;
+                return seekScheduler?.scheduleScrub(frame) ?? 0;
+              },
+            },
+            signal,
           );
+          seekScheduler.requestExact(0);
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
         return;
       }
       if (message.type === "frame_set") {
-        validateFrameSetBuffers(message, buffers);
         if (metadata === undefined || playerView === undefined) {
           throw new ProtocolError(
             "invalid_message",
@@ -121,12 +132,21 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         if (!isCurrent()) {
           return;
         }
-        const painted = await paintFrameSet(
-          playerView,
-          message,
-          buffers,
-          isCurrent,
-        );
+        let painted: boolean;
+        try {
+          validateFrameSetBuffers(message, buffers);
+          painted = await paintFrameSet(
+            playerView,
+            message,
+            buffers,
+            isCurrent,
+          );
+        } catch (error) {
+          if (!isCurrent()) {
+            return;
+          }
+          throw error;
+        }
         if (painted) {
           updateStatus(`Frame ${message.frame} ready.`);
         }
@@ -159,9 +179,14 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   };
 
   model.on("msg:custom", onMessage);
-  signal.addEventListener("abort", () => model.off("msg:custom", onMessage), {
-    once: true,
-  });
+  signal.addEventListener(
+    "abort",
+    () => {
+      seekScheduler?.close();
+      model.off("msg:custom", onMessage);
+    },
+    { once: true },
+  );
 
   const imageBitmap = typeof globalThis.createImageBitmap === "function";
   if (!imageBitmap) {

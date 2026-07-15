@@ -10,6 +10,9 @@ const showSideBySide = new URLSearchParams(window.location.search).has(
   "side-by-side",
 );
 const showWebp = new URLSearchParams(window.location.search).get("codec") === "webp";
+const testRapidSeek = new URLSearchParams(window.location.search).has(
+  "rapid-seek",
+);
 const clipId = showConversionWarning ? "Filtered" : "Source";
 const activeClipIds = showSideBySide ? ["Source", "Filtered"] : [clipId];
 
@@ -51,7 +54,7 @@ const model = {
           type: "metadata",
           session_id: sessionId,
           status: "initialized",
-          num_frames: 1,
+          num_frames: testRapidSeek ? 10 : 1,
           fps_num: 24,
           fps_den: 1,
           mode: showSideBySide ? "side-by-side" : "single",
@@ -87,11 +90,13 @@ const model = {
       const fixtureNames = showSideBySide
         ? ["frame.jpg", "filtered.jpg"]
         : [showWebp ? "frame.webp" : "frame.jpg"];
+      const responseDelay = testRapidSeek && message.frame === 2 ? 120 : 0;
       void Promise.all(
         fixtureNames.map((name) =>
           fetch(`./${name}`).then((response) => response.arrayBuffer()),
         ),
       ).then((buffers) => {
+        setTimeout(() => {
           emit(
             {
               protocol: 1,
@@ -111,6 +116,7 @@ const model = {
             },
             buffers.map((buffer) => new DataView(buffer)),
           );
+        }, responseDelay);
         });
     }
   },

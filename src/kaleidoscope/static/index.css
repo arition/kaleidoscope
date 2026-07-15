@@ -47,6 +47,73 @@
   font-variant-numeric: tabular-nums;
   font-size: 0.8125rem;
 }
+.kaleidoscope-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.375rem;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.kaleidoscope-control-button,
+.kaleidoscope-frame-input,
+.kaleidoscope-time-input {
+  box-sizing: border-box;
+  height: 2rem;
+  color: var(--jp-ui-font-color1, #202124);
+  background: var(--jp-layout-color1, #ffffff);
+  border: 1px solid var(--jp-border-color1, #8a9099);
+  border-radius: 3px;
+  font: inherit;
+}
+.kaleidoscope-control-button {
+  width: 2rem;
+  flex: 0 0 2rem;
+  padding: 0;
+  cursor: pointer;
+}
+.kaleidoscope-control-button:hover:not(:disabled) {
+  background: var(--jp-layout-color2, #eeeeee);
+}
+.kaleidoscope-control-button:focus-visible,
+.kaleidoscope-frame-input:focus-visible,
+.kaleidoscope-time-input:focus-visible,
+.kaleidoscope-seek:focus-visible {
+  outline: 2px solid var(--jp-brand-color1, #118ab2);
+  outline-offset: 1px;
+}
+.kaleidoscope-control-button:disabled,
+.kaleidoscope-frame-input:disabled,
+.kaleidoscope-time-input:disabled,
+.kaleidoscope-seek:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.kaleidoscope-seek {
+  min-width: 6rem;
+  flex: 1 1 8rem;
+  margin: 0;
+  accent-color: var(--jp-brand-color1, #118ab2);
+}
+.kaleidoscope-frame-input {
+  width: 4.5rem;
+  min-width: 4.5rem;
+  flex: 0 0 4.5rem;
+  padding: 0 0.375rem;
+}
+.kaleidoscope-time-input {
+  width: 7.5rem;
+  min-width: 7.5rem;
+  flex: 0 0 7.5rem;
+  padding: 0 0.375rem;
+}
+.kaleidoscope-frame-total,
+.kaleidoscope-duration {
+  flex: 0 0 auto;
+  color: var(--jp-ui-font-color2, #5f6368);
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
 .kaleidoscope-clips {
   display: grid;
   gap: 0.375rem;
