@@ -982,6 +982,25 @@ describe("atomic comparison painting", () => {
     );
   });
 
+  it("announces the aligned clips, mode, frame, and time", async () => {
+    const { element, model } = await setupInteractiveComparison();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Wipe view']")?.click();
+    model.emit(
+      selectedFrameSet(1, 1, 0, ["Source", "Filtered"]),
+      payloads(),
+    );
+
+    await vi.waitFor(() =>
+      expect(
+        element
+          .querySelector(".kaleidoscope-comparison__canvas")
+          ?.getAttribute("aria-label"),
+      ).toBe(
+        "Source and Filtered, wipe comparison, frame 0, time 00:00:00.000",
+      ),
+    );
+  });
+
   it("announces a changed aligned pair without changing committed rows", async () => {
     const { element, model } = await setupInteractiveComparison();
     element.querySelector<HTMLButtonElement>("button[aria-label='Wipe view']")?.click();

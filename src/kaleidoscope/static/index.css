@@ -17,6 +17,18 @@
   border-radius: 6px;
   font-family: var(--jp-ui-font-family, "IBM Plex Sans", sans-serif);
 }
+.kaleidoscope-widget:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+}
+.kaleidoscope-widget:fullscreen .kaleidoscope-comparison__canvas,
+.kaleidoscope-widget:fullscreen .kaleidoscope-canvas {
+  max-height: calc(100vh - 16rem);
+}
 .kaleidoscope-status {
   font-size: 0.875rem;
   line-height: 1.5;
@@ -55,6 +67,40 @@
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
+@media (max-width: 34rem) {
+  .kaleidoscope-widget {
+    gap: 0.5rem;
+    padding: 0.625rem;
+  }
+  .kaleidoscope-controls {
+    display: grid;
+    grid-template-columns: repeat(7, 2rem) minmax(0, 1fr);
+  }
+  .kaleidoscope-seek {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+  }
+  .kaleidoscope-frame-input {
+    grid-column: 1 / span 2;
+    width: 100%;
+    min-width: 0;
+  }
+  .kaleidoscope-frame-total {
+    grid-column: 3 / span 2;
+  }
+  .kaleidoscope-time-input {
+    grid-column: 5 / span 3;
+    width: 100%;
+    min-width: 0;
+  }
+  .kaleidoscope-duration {
+    grid-column: 8;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
 .kaleidoscope-comparison-toolbar,
 .kaleidoscope-mode-control,
 .kaleidoscope-selection-control,
@@ -67,11 +113,13 @@
   gap: 0.5rem;
 }
 .kaleidoscope-mode-control {
+  flex-wrap: wrap;
   overflow: hidden;
   border: 1px solid var(--jp-border-color1, #8a9099);
   border-radius: 4px;
 }
 .kaleidoscope-mode-button {
+  flex: 1 1 auto;
   min-height: 2rem;
   padding: 0 0.625rem;
   color: var(--jp-ui-font-color1, #202124);
@@ -300,4 +348,14 @@
 }
 .kaleidoscope-status--ready {
   color: var(--jp-ui-font-color2, #5f6368);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kaleidoscope-widget *,
+  .kaleidoscope-widget *::before,
+  .kaleidoscope-widget *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

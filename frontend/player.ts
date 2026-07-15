@@ -25,6 +25,7 @@ export interface PlayerView {
   getFrame(): number;
   prepareComparisonCommit(
     candidateCanvases: ReadonlyMap<ClipId, HTMLCanvasElement>,
+    frame?: number,
   ): () => void;
   setComparison(state: ComparisonState, deferComposition?: boolean): void;
   setFrame(frame: number): void;
@@ -40,6 +41,14 @@ export interface PlayerNavigation {
 
 function idsMatch(left: ClipId, right: ClipId): boolean {
   return left === right;
+}
+
+function describeFrame(
+  label: string,
+  frame: number,
+  metadata: PreviewMetadataMessage,
+): string {
+  return `${label}, frame ${frame}, time ${formatFrameTime(frame, metadata.fps_num, metadata.fps_den)}`;
 }
 
 const ALIGNED_MODES: ReadonlySet<ComparisonMode> = new Set([
@@ -159,6 +168,8 @@ export function renderMetadata(
 ): PlayerView {
   const canvases = new Map<ClipId, HTMLCanvasElement>();
   const rows = new Map<ClipId, HTMLElement>();
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-label", "Kaleidoscope video preview");
   const header = document.createElement("header");
   header.className = "kaleidoscope-header";
 
@@ -284,6 +295,42 @@ export function renderMetadata(
     () => message.num_frames - 1,
   );
 
+  const fullscreen = document.createElement("button");
+  fullscreen.type = "button";
+  fullscreen.className = "kaleidoscope-control-button";
+  const fullscreenSupported =
+    typeof root.requestFullscreen === "function" &&
+    typeof document.exitFullscreen === "function";
+  fullscreen.disabled = !fullscreenSupported;
+  let reportFullscreenError = (): void => {};
+  const updateFullscreen = (): void => {
+    const active = document.fullscreenElement === root;
+    const label = active ? "Exit fullscreen" : "Enter fullscreen";
+    fullscreen.setAttribute("aria-label", label);
+    fullscreen.title = fullscreenSupported ? label : "Fullscreen unavailable";
+    fullscreen.textContent = active ? "↙" : "⛶";
+    fullscreen.setAttribute("aria-pressed", String(active));
+  };
+  const toggleFullscreen = (): void => {
+    if (!fullscreenSupported) {
+      return;
+    }
+    if (document.fullscreenElement === root) {
+      void document.exitFullscreen().catch(() => {
+        updateFullscreen();
+        reportFullscreenError();
+      });
+    } else {
+      void root.requestFullscreen().catch(() => {
+        updateFullscreen();
+        reportFullscreenError();
+      });
+    }
+  };
+  updateFullscreen();
+  fullscreen.addEventListener("click", toggleFullscreen, { signal });
+  document.addEventListener("fullscreenchange", updateFullscreen, { signal });
+
   seek.addEventListener(
     "input",
     () => {
@@ -336,6 +383,7 @@ export function renderMetadata(
     totalFrames,
     time,
     duration,
+    fullscreen,
   );
 
   root.tabIndex = 0;
@@ -343,16 +391,22 @@ export function renderMetadata(
     "keydown",
     (event) => {
       const target = event.target;
-      if (
+      const editingText =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
-        target instanceof HTMLButtonElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
+        (target instanceof HTMLElement && target.isContentEditable);
+      if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey) {
+      if (event.key.toLowerCase() === "f") {
+        if (!editingText) {
+          event.preventDefault();
+          toggleFullscreen();
+        }
+        return;
+      }
+      if (editingText || target instanceof HTMLButtonElement) {
         return;
       }
       if (event.key === " ") {
@@ -410,6 +464,9 @@ export function renderMetadata(
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
+  reportFullscreenError = () => {
+    status.textContent = "Fullscreen is unavailable in this notebook context.";
+  };
 
   const comparison = createComparisonView({
     metadata: message,
@@ -568,7 +625,13 @@ export async function paintFrameSet(
       );
       stagedCanvas.setAttribute(
         "aria-label",
-        `${view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`,
+        describeFrame(
+          view.metadata.clips.find((clip) =>
+            idsMatch(clip.id, frame.manifest.clip_id),
+          )?.label ?? "Clip",
+          message.frame,
+          view.metadata,
+        ),
       );
     }
     if (!shouldCommit()) {
@@ -582,7 +645,10 @@ export async function paintFrameSet(
         target.stagedCanvas,
       );
     }
-    const commitComparison = view.prepareComparisonCommit(candidateCanvases);
+    const commitComparison = view.prepareComparisonCommit(
+      candidateCanvases,
+      message.frame,
+    );
     if (!shouldCommit()) {
       return false;
     }

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 test("paints an RGB24 frame", async ({ page }) => {
   const browserErrors: string[] = [];
@@ -430,7 +431,7 @@ test("paused navigation reaches exact first middle and last frames", async ({
   expect(requestFrames).toEqual([0, 5, 9, 0]);
 });
 
-test("paused navigation controls fit a narrow notebook", async ({ page }) => {
+test("responsive controls fit a narrow notebook", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/tests/e2e/harness/?rapid-seek=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
@@ -459,7 +460,128 @@ test("paused navigation controls fit a narrow notebook", async ({ page }) => {
   expect(geometry.seekWidth).toBeGreaterThanOrEqual(96);
   expect(geometry.frameWidth).toBeGreaterThanOrEqual(72);
   expect(geometry.timeWidth).toBeGreaterThanOrEqual(112);
+  await test.info().attach("narrow-player", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
 });
+
+test("responsive comparison modes remain reachable in a narrow notebook", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/tests/e2e/harness/?side-by-side=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  const geometry = await page
+    .getByRole("group", { name: "Comparison mode" })
+    .evaluate((element) => ({
+      overflow: element.scrollWidth - element.clientWidth,
+      visibleButtons: Array.from(element.querySelectorAll("button")).every(
+        (button) => {
+          const bounds = button.getBoundingClientRect();
+          const container = element.getBoundingClientRect();
+          return bounds.left >= container.left && bounds.right <= container.right;
+        },
+      ),
+    }));
+  expect(geometry.overflow).toBeLessThanOrEqual(0);
+  expect(geometry.visibleButtons).toBe(true);
+});
+
+test("responsive desktop and fullscreen layouts remain framed", async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      browserErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/tests/e2e/harness/?side-by-side=1");
+  await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+
+  const player = page.getByRole("region", {
+    name: "Kaleidoscope video preview",
+  });
+  await expect(player).toBeVisible();
+  const desktopGeometry = await player.evaluate((element) => ({
+    overflow: element.scrollWidth - element.clientWidth,
+    width: element.getBoundingClientRect().width,
+  }));
+  expect(desktopGeometry.overflow).toBeLessThanOrEqual(0);
+  expect(desktopGeometry.width).toBeLessThanOrEqual(1280);
+  await test.info().attach("desktop-player", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+
+  await page.locator("body").press("f");
+  await expect(page.getByRole("button", { name: "Enter fullscreen" })).toBeVisible();
+  await player.focus();
+  await player.press("f");
+  await expect(page.getByRole("button", { name: "Exit fullscreen" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement !== null))
+    .toBe(true);
+  const fullscreenGeometry = await player.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      width: bounds.width,
+      height: bounds.height,
+    };
+  });
+  expect(fullscreenGeometry.overflow).toBeLessThanOrEqual(0);
+  expect(fullscreenGeometry.width).toBe(1280);
+  expect(fullscreenGeometry.height).toBe(800);
+  await test.info().attach("fullscreen-player", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+
+  const pixel = await page.locator(".kaleidoscope-canvas").first().evaluate((element) => {
+    const context = (element as HTMLCanvasElement).getContext("2d");
+    if (context === null) {
+      throw new Error("Canvas 2D context is unavailable.");
+    }
+    return Array.from(context.getImageData(32, 24, 1, 1).data);
+  });
+  expect(pixel[3]).toBe(255);
+  expect(browserErrors).toEqual([]);
+});
+
+for (const theme of ["light", "dark"] as const) {
+  test(`accessibility scan has no serious or critical issues in ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.goto("/tests/e2e/harness/?side-by-side=1");
+    await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
+    if (theme === "dark") {
+      await page.locator("html").evaluate((element) => {
+        element.style.setProperty("--jp-layout-color1", "#1f2228");
+        element.style.setProperty("--jp-layout-color2", "#2d333b");
+        element.style.setProperty("--jp-ui-font-color1", "#f0f3f6");
+        element.style.setProperty("--jp-ui-font-color2", "#c7d1db");
+        element.style.setProperty("--jp-border-color1", "#768390");
+        element.style.setProperty("--jp-border-color2", "#444c56");
+        element.style.setProperty("--jp-brand-color1", "#087f8c");
+        element.style.setProperty("--jp-ui-inverse-font-color1", "#ffffff");
+      });
+    }
+
+    const results = await new AxeBuilder({ page })
+      .include(".kaleidoscope-widget")
+      .options({ resultTypes: ["violations"] })
+      .analyze();
+    expect(
+      results.violations.filter(
+        (violation) =>
+          violation.impact === "serious" || violation.impact === "critical",
+      ),
+    ).toEqual([]);
+  });
+}
 
 test("playback pauses at the final frame and restarts from zero", async ({
   page,

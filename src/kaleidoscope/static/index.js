@@ -322,6 +322,96 @@ var transitionComparisonState = (current, metadata, transition) => {
   };
 };
 
+// frontend/time.ts
+var MAX_TIME_INPUT_LENGTH = 32;
+function clampFrame(frame, numFrames) {
+  if (frame <= 0n) {
+    return 0;
+  }
+  const lastFrame = BigInt(numFrames - 1);
+  return Number(frame >= lastFrame ? lastFrame : frame);
+}
+function floorDivide(numerator, denominator) {
+  const quotient = numerator / denominator;
+  return numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
+}
+function frameFromScaledSeconds(numerator, denominator, fpsNum, fpsDen, numFrames) {
+  const frame = floorDivide(
+    numerator * BigInt(fpsNum),
+    denominator * BigInt(fpsDen)
+  );
+  return clampFrame(frame, numFrames);
+}
+function decimalScale(fraction) {
+  return 10n ** BigInt(fraction.length);
+}
+function parseScaledSeconds(value) {
+  if (value.length > MAX_TIME_INPUT_LENGTH) {
+    return void 0;
+  }
+  const trimmed = value.trim();
+  const clockMatch = /^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(trimmed);
+  if (clockMatch !== null) {
+    const [, hoursText, minutesText, secondsText, fractionText2 = ""] = clockMatch;
+    const minutes = Number(minutesText);
+    const seconds = Number(secondsText);
+    if (minutes >= 60 || seconds >= 60) {
+      return void 0;
+    }
+    const denominator2 = decimalScale(fractionText2);
+    const wholeSeconds = (BigInt(hoursText) * 60n + BigInt(minutes)) * 60n + BigInt(seconds);
+    return {
+      numerator: wholeSeconds * denominator2 + BigInt(fractionText2 === "" ? "0" : fractionText2),
+      denominator: denominator2
+    };
+  }
+  const decimalMatch = /^(-?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (decimalMatch === null) {
+    return void 0;
+  }
+  const [, sign, wholeText, fractionText = ""] = decimalMatch;
+  const denominator = decimalScale(fractionText);
+  const magnitude = BigInt(wholeText) * denominator + BigInt(fractionText === "" ? "0" : fractionText);
+  return {
+    numerator: sign === "-" ? -magnitude : magnitude,
+    denominator
+  };
+}
+function parseTimeToFrame(value, fpsNum, fpsDen, numFrames) {
+  const time = parseScaledSeconds(value);
+  return time === void 0 ? void 0 : frameFromScaledSeconds(
+    time.numerator,
+    time.denominator,
+    fpsNum,
+    fpsDen,
+    numFrames
+  );
+}
+function offsetFrameBySeconds(frame, seconds, fpsNum, fpsDen, numFrames) {
+  const frameOffset = floorDivide(
+    BigInt(Math.trunc(seconds)) * BigInt(fpsNum),
+    BigInt(fpsDen)
+  );
+  return clampFrame(BigInt(frame) + frameOffset, numFrames);
+}
+function formatFrameTime(frame, fpsNum, fpsDen) {
+  let precision = 3;
+  let scale = 1000n;
+  while (scale * BigInt(fpsDen) < BigInt(fpsNum)) {
+    precision += 1;
+    scale *= 10n;
+  }
+  const numerator = BigInt(frame) * BigInt(fpsDen) * scale;
+  const denominator = BigInt(fpsNum);
+  const ticks = (numerator + denominator - 1n) / denominator;
+  const totalSeconds = ticks / scale;
+  const hours = totalSeconds / 3600n;
+  const minutes = totalSeconds % 3600n / 60n;
+  const seconds = totalSeconds % 60n;
+  const fraction = ticks % scale;
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${fraction.toString().padStart(precision, "0")}`;
+}
+
 // frontend/comparison-view.ts
 var ALIGNED_MODES = /* @__PURE__ */ new Set([
   "wipe",
@@ -342,6 +432,7 @@ function createComparisonView(options) {
   } = options;
   let state = createComparisonState(metadata);
   let committedState = state;
+  let committedFrame = 0;
   const toolbar = document.createElement("div");
   toolbar.className = "kaleidoscope-comparison-toolbar";
   const modeControl = document.createElement("div");
@@ -530,8 +621,9 @@ function createComparisonView(options) {
       comparisonParameters.append(note);
     }
   };
-  const prepareCommit = (candidateCanvases) => {
+  const prepareCommit = (candidateCanvases, frame) => {
     const next = state;
+    const nextFrame = frame ?? committedFrame;
     let stagedComparison;
     let comparisonLabel = "";
     if (ALIGNED_MODES.has(next.mode)) {
@@ -596,12 +688,13 @@ function createComparisonView(options) {
       }
       stagedComparison.setAttribute(
         "aria-label",
-        `${clipForId(next.primary).label} and ${clipForId(secondary).label}, ${next.mode} comparison`
+        `${clipForId(next.primary).label} and ${clipForId(secondary).label}, ${next.mode} comparison, frame ${nextFrame}, time ${formatFrameTime(nextFrame, metadata.fps_num, metadata.fps_den)}`
       );
       comparisonLabel = `${clipForId(next.primary).label} (A) | ${clipForId(secondary).label} (B)`;
     }
     return () => {
       const previousState = committedState;
+      const previousFrame = committedFrame;
       const previousModeLabel = modeLabel.textContent;
       const previousMode = clips.dataset.mode;
       const previousHidden = comparison.hidden;
@@ -646,8 +739,10 @@ function createComparisonView(options) {
           comparisonCanvas = stagedComparison;
         }
         committedState = next;
+        committedFrame = nextFrame;
       } catch (error) {
         committedState = previousState;
+        committedFrame = previousFrame;
         modeLabel.textContent = previousModeLabel;
         if (previousMode === void 0) {
           delete clips.dataset.mode;
@@ -737,99 +832,12 @@ function createComparisonView(options) {
   };
 }
 
-// frontend/time.ts
-var MAX_TIME_INPUT_LENGTH = 32;
-function clampFrame(frame, numFrames) {
-  if (frame <= 0n) {
-    return 0;
-  }
-  const lastFrame = BigInt(numFrames - 1);
-  return Number(frame >= lastFrame ? lastFrame : frame);
-}
-function floorDivide(numerator, denominator) {
-  const quotient = numerator / denominator;
-  return numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
-}
-function frameFromScaledSeconds(numerator, denominator, fpsNum, fpsDen, numFrames) {
-  const frame = floorDivide(
-    numerator * BigInt(fpsNum),
-    denominator * BigInt(fpsDen)
-  );
-  return clampFrame(frame, numFrames);
-}
-function decimalScale(fraction) {
-  return 10n ** BigInt(fraction.length);
-}
-function parseScaledSeconds(value) {
-  if (value.length > MAX_TIME_INPUT_LENGTH) {
-    return void 0;
-  }
-  const trimmed = value.trim();
-  const clockMatch = /^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(trimmed);
-  if (clockMatch !== null) {
-    const [, hoursText, minutesText, secondsText, fractionText2 = ""] = clockMatch;
-    const minutes = Number(minutesText);
-    const seconds = Number(secondsText);
-    if (minutes >= 60 || seconds >= 60) {
-      return void 0;
-    }
-    const denominator2 = decimalScale(fractionText2);
-    const wholeSeconds = (BigInt(hoursText) * 60n + BigInt(minutes)) * 60n + BigInt(seconds);
-    return {
-      numerator: wholeSeconds * denominator2 + BigInt(fractionText2 === "" ? "0" : fractionText2),
-      denominator: denominator2
-    };
-  }
-  const decimalMatch = /^(-?)(\d+)(?:\.(\d+))?$/.exec(trimmed);
-  if (decimalMatch === null) {
-    return void 0;
-  }
-  const [, sign, wholeText, fractionText = ""] = decimalMatch;
-  const denominator = decimalScale(fractionText);
-  const magnitude = BigInt(wholeText) * denominator + BigInt(fractionText === "" ? "0" : fractionText);
-  return {
-    numerator: sign === "-" ? -magnitude : magnitude,
-    denominator
-  };
-}
-function parseTimeToFrame(value, fpsNum, fpsDen, numFrames) {
-  const time = parseScaledSeconds(value);
-  return time === void 0 ? void 0 : frameFromScaledSeconds(
-    time.numerator,
-    time.denominator,
-    fpsNum,
-    fpsDen,
-    numFrames
-  );
-}
-function offsetFrameBySeconds(frame, seconds, fpsNum, fpsDen, numFrames) {
-  const frameOffset = floorDivide(
-    BigInt(Math.trunc(seconds)) * BigInt(fpsNum),
-    BigInt(fpsDen)
-  );
-  return clampFrame(BigInt(frame) + frameOffset, numFrames);
-}
-function formatFrameTime(frame, fpsNum, fpsDen) {
-  let precision = 3;
-  let scale = 1000n;
-  while (scale * BigInt(fpsDen) < BigInt(fpsNum)) {
-    precision += 1;
-    scale *= 10n;
-  }
-  const numerator = BigInt(frame) * BigInt(fpsDen) * scale;
-  const denominator = BigInt(fpsNum);
-  const ticks = (numerator + denominator - 1n) / denominator;
-  const totalSeconds = ticks / scale;
-  const hours = totalSeconds / 3600n;
-  const minutes = totalSeconds % 3600n / 60n;
-  const seconds = totalSeconds % 60n;
-  const fraction = ticks % scale;
-  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${fraction.toString().padStart(precision, "0")}`;
-}
-
 // frontend/player.ts
 function idsMatch2(left, right) {
   return left === right;
+}
+function describeFrame(label, frame, metadata) {
+  return `${label}, frame ${frame}, time ${formatFrameTime(frame, metadata.fps_num, metadata.fps_den)}`;
 }
 function createClipWarnings(clip) {
   const warnings = document.createElement("ul");
@@ -913,6 +921,8 @@ function createClipRow(clip, activeClipIds, canvases) {
 function renderMetadata(root, message, navigation, signal) {
   const canvases = /* @__PURE__ */ new Map();
   const rows = /* @__PURE__ */ new Map();
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-label", "Kaleidoscope video preview");
   const header = document.createElement("header");
   header.className = "kaleidoscope-header";
   const title = document.createElement("strong");
@@ -1019,6 +1029,40 @@ function renderMetadata(root, message, navigation, signal) {
     ">|",
     () => message.num_frames - 1
   );
+  const fullscreen = document.createElement("button");
+  fullscreen.type = "button";
+  fullscreen.className = "kaleidoscope-control-button";
+  const fullscreenSupported = typeof root.requestFullscreen === "function" && typeof document.exitFullscreen === "function";
+  fullscreen.disabled = !fullscreenSupported;
+  let reportFullscreenError = () => {
+  };
+  const updateFullscreen = () => {
+    const active = document.fullscreenElement === root;
+    const label = active ? "Exit fullscreen" : "Enter fullscreen";
+    fullscreen.setAttribute("aria-label", label);
+    fullscreen.title = fullscreenSupported ? label : "Fullscreen unavailable";
+    fullscreen.textContent = active ? "\u2199" : "\u26F6";
+    fullscreen.setAttribute("aria-pressed", String(active));
+  };
+  const toggleFullscreen = () => {
+    if (!fullscreenSupported) {
+      return;
+    }
+    if (document.fullscreenElement === root) {
+      void document.exitFullscreen().catch(() => {
+        updateFullscreen();
+        reportFullscreenError();
+      });
+    } else {
+      void root.requestFullscreen().catch(() => {
+        updateFullscreen();
+        reportFullscreenError();
+      });
+    }
+  };
+  updateFullscreen();
+  fullscreen.addEventListener("click", toggleFullscreen, { signal });
+  document.addEventListener("fullscreenchange", updateFullscreen, { signal });
   seek.addEventListener(
     "input",
     () => {
@@ -1069,17 +1113,26 @@ function renderMetadata(root, message, navigation, signal) {
     frame,
     totalFrames,
     time,
-    duration
+    duration,
+    fullscreen
   );
   root.tabIndex = 0;
   root.addEventListener(
     "keydown",
     (event) => {
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement || target instanceof HTMLElement && target.isContentEditable) {
+      const editingText = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLElement && target.isContentEditable;
+      if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey) {
+      if (event.key.toLowerCase() === "f") {
+        if (!editingText) {
+          event.preventDefault();
+          toggleFullscreen();
+        }
+        return;
+      }
+      if (editingText || target instanceof HTMLButtonElement) {
         return;
       }
       if (event.key === " ") {
@@ -1131,6 +1184,9 @@ function renderMetadata(root, message, navigation, signal) {
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   status.textContent = "Kaleidoscope is ready.";
+  reportFullscreenError = () => {
+    status.textContent = "Fullscreen is unavailable in this notebook context.";
+  };
   const comparison = createComparisonView({
     metadata: message,
     canvases,
@@ -1251,7 +1307,13 @@ async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
       );
       stagedCanvas.setAttribute(
         "aria-label",
-        `${view.metadata.clips.find((clip) => idsMatch2(clip.id, frame.manifest.clip_id))?.label ?? "Clip"}, frame ${message.frame}`
+        describeFrame(
+          view.metadata.clips.find(
+            (clip) => idsMatch2(clip.id, frame.manifest.clip_id)
+          )?.label ?? "Clip",
+          message.frame,
+          view.metadata
+        )
       );
     }
     if (!shouldCommit()) {
@@ -1264,7 +1326,10 @@ async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
         target.stagedCanvas
       );
     }
-    const commitComparison = view.prepareComparisonCommit(candidateCanvases);
+    const commitComparison = view.prepareComparisonCommit(
+      candidateCanvases,
+      message.frame
+    );
     if (!shouldCommit()) {
       return false;
     }

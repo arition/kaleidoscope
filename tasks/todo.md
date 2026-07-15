@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T10 complete; T11 is next
+Status: G1 approved; T11 complete; T12 is next
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.5 approved
 
@@ -85,11 +85,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Make close/removal cleanup idempotent and suppress late completions.
   - [x] Prove multiple widgets remain independent and leak-free.
 
-- [ ] **T11 - Accessible responsive notebook player** (depends on T10)
-  - [ ] Complete keyboard scoping, labels, live regions, focus, and contrast.
-  - [ ] Make wipe and opacity controls fully keyboard-operable.
-  - [ ] Implement stable narrow/desktop/fullscreen layouts and theme support.
-  - [ ] Run accessibility, screenshot, console, and canvas-pixel browser checks.
+- [x] **T11 - Accessible responsive notebook player** (depends on T10)
+  - [x] Complete keyboard scoping, labels, live regions, focus, and contrast.
+  - [x] Make wipe and opacity controls fully keyboard-operable.
+  - [x] Implement stable narrow/desktop/fullscreen layouts and theme support.
+  - [x] Run accessibility, screenshot, console, and canvas-pixel browser checks.
 
 - [ ] **T12 - Distributable package, examples, and docs** (depends on T11)
   - [ ] Finalize wheel/sdist contents, `py.typed`, metadata, and license.

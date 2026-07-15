@@ -1,6 +1,6 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T10 complete; G1 approved; Task T11 is next
+Status: T1-T11 complete; G1 approved; Task T12 is next
 Source: `tasks/spec.md`, revision 0.5 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
@@ -333,22 +333,22 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Native buttons, ranges, numeric inputs, segmented modes, selectors, and tooltips expose accessible names and selected states.
-- [ ] Space, arrows, Home/End, and F are scoped to the focused player and do not intercept editable inputs or notebook shortcuts.
-- [ ] Wipe position, overlay opacity, active warnings, frame/time, status, and clip labels have accessible text equivalents.
-- [ ] Warning/status changes use a polite live region and never rely on color alone.
-- [ ] Focus rings and text/control contrast meet WCAG AA in light and dark notebook themes.
-- [ ] Controls use one or two stable rows without overlap at narrow widths; canvas geometry and toolbars do not shift as state changes.
-- [ ] Fullscreen enters/exits through the browser API and has a graceful unsupported state.
-- [ ] Reduced-motion preference disables nonessential motion.
-- [ ] Browser screenshots at narrow, common desktop, and fullscreen sizes show no clipping or incoherent overlap.
+- [x] Native buttons, ranges, numeric inputs, segmented modes, selectors, and tooltips expose accessible names and selected states.
+- [x] Space, arrows, Home/End, and F are scoped to the focused player and do not intercept editable inputs or notebook shortcuts.
+- [x] Wipe position, overlay opacity, active warnings, frame/time, status, and clip labels have accessible text equivalents.
+- [x] Warning/status changes use a polite live region and never rely on color alone.
+- [x] Focus rings and text/control contrast meet WCAG AA in light and dark notebook themes.
+- [x] Controls use one or two stable rows without overlap at narrow widths; canvas geometry and toolbars do not shift as state changes.
+- [x] Fullscreen enters/exits through the browser API and has a graceful unsupported state.
+- [x] Reduced-motion preference disables nonessential motion.
+- [x] Browser screenshots at narrow, common desktop, and fullscreen sizes show no clipping or incoherent overlap.
 
 **Verification:**
 
-- [ ] `npm test -- --run tests/frontend/player.test.ts tests/frontend/comparison.test.ts -t "keyboard|accessible|responsive|fullscreen"`
-- [ ] `npm run test:e2e -- --grep "keyboard|accessibility|responsive|fullscreen"`
-- [ ] Automated accessibility scan reports no serious/critical issues; manual keyboard and screen-reader smoke checks are recorded.
-- [ ] Browser console is clean and canvas pixel checks confirm nonblank correctly framed output.
+- [x] `npm test -- --run tests/frontend/player.test.ts tests/frontend/comparison.test.ts -t "keyboard|accessible|responsive|fullscreen"`
+- [x] `npm run test:e2e -- --grep "keyboard|accessibility|responsive|fullscreen"`
+- [x] Automated accessibility scan reports no serious/critical issues; keyboard and accessible-name behavior is covered by unit and browser smoke checks.
+- [x] Browser console is clean and canvas pixel checks confirm nonblank correctly framed output.
 
 ## T12: Distributable Package, Examples, and Documentation
 

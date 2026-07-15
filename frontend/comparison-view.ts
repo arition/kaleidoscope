@@ -9,6 +9,7 @@ import type {
   ComparisonMode,
   PreviewMetadataMessage,
 } from "./protocol.js";
+import { formatFrameTime } from "./time.js";
 
 export interface ComparisonViewController {
   readonly toolbar: HTMLElement;
@@ -16,6 +17,7 @@ export interface ComparisonViewController {
   compose(): void;
   prepareCommit(
     candidateCanvases: ReadonlyMap<ClipId, HTMLCanvasElement>,
+    frame?: number,
   ): () => void;
   setState(state: ComparisonState, deferComposition?: boolean): void;
 }
@@ -60,6 +62,7 @@ export function createComparisonView(
   } = options;
   let state = createComparisonState(metadata);
   let committedState = state;
+  let committedFrame = 0;
 
   const toolbar = document.createElement("div");
   toolbar.className = "kaleidoscope-comparison-toolbar";
@@ -296,8 +299,10 @@ export function createComparisonView(
 
   const prepareCommit = (
     candidateCanvases: ReadonlyMap<ClipId, HTMLCanvasElement>,
+    frame?: number,
   ): (() => void) => {
     const next = state;
+    const nextFrame = frame ?? committedFrame;
     let stagedComparison: HTMLCanvasElement | undefined;
     let comparisonLabel = "";
     if (ALIGNED_MODES.has(next.mode)) {
@@ -363,13 +368,14 @@ export function createComparisonView(
       }
       stagedComparison.setAttribute(
         "aria-label",
-        `${clipForId(next.primary).label} and ${clipForId(secondary).label}, ${next.mode} comparison`,
+        `${clipForId(next.primary).label} and ${clipForId(secondary).label}, ${next.mode} comparison, frame ${nextFrame}, time ${formatFrameTime(nextFrame, metadata.fps_num, metadata.fps_den)}`,
       );
       comparisonLabel = `${clipForId(next.primary).label} (A) | ${clipForId(secondary).label} (B)`;
     }
 
     return () => {
       const previousState = committedState;
+      const previousFrame = committedFrame;
       const previousModeLabel = modeLabel.textContent;
       const previousMode = clips.dataset.mode;
       const previousHidden = comparison.hidden;
@@ -414,8 +420,10 @@ export function createComparisonView(
           comparisonCanvas = stagedComparison;
         }
         committedState = next;
+        committedFrame = nextFrame;
       } catch (error) {
         committedState = previousState;
+        committedFrame = previousFrame;
         modeLabel.textContent = previousModeLabel;
         if (previousMode === undefined) {
           delete clips.dataset.mode;

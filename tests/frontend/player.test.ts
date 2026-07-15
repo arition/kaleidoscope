@@ -59,6 +59,11 @@ describe("metadata presentation", () => {
     expect(element.textContent).toContain("1920 x 1080");
     expect(element.textContent).toContain("1280 x 720");
     expect(element.querySelectorAll("[data-clip-id]")).toHaveLength(2);
+    const fullscreen = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Enter fullscreen']",
+    );
+    expect(fullscreen?.disabled).toBe(true);
+    expect(fullscreen?.title).toBe("Fullscreen unavailable");
   });
 
   it("marks only the active clips", () => {
@@ -699,6 +704,86 @@ describe("metadata presentation", () => {
     expect(requests.map((request) => request.frame)).toEqual([0, 1, 24, 239, 0]);
   });
 
+  it("supports scoped fullscreen controls and the F shortcut", async () => {
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, "exitFullscreen", {
+      configurable: true,
+      value: exitFullscreen,
+    });
+    let fullscreenElement: Element | null = null;
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 4,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1920,
+          source_height: 1080,
+          output_width: 1920,
+          output_height: 1080,
+          warnings: [],
+        },
+      ],
+    });
+
+    const fullscreen = element.querySelector<HTMLButtonElement>(
+      "button[aria-label='Enter fullscreen']",
+    );
+    expect(fullscreen?.title).toBe("Enter fullscreen");
+    fullscreen?.click();
+    expect(requestFullscreen).toHaveBeenCalledOnce();
+
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
+    );
+    expect(requestFullscreen).toHaveBeenCalledTimes(2);
+
+    fullscreen?.focus();
+    fullscreen?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
+    );
+    expect(requestFullscreen).toHaveBeenCalledTimes(3);
+
+    const frame = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current frame']",
+    );
+    frame?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
+    );
+    expect(requestFullscreen).toHaveBeenCalledTimes(3);
+
+    fullscreenElement = element;
+    document.dispatchEvent(new Event("fullscreenchange"));
+    expect(fullscreen?.getAttribute("aria-label")).toBe("Exit fullscreen");
+    fullscreen?.click();
+    expect(exitFullscreen).toHaveBeenCalledOnce();
+  });
+
   it("plays from a rational clock and pauses from the visible control", () => {
     let scheduled: FrameRequestCallback | undefined;
     const cancel = vi.fn();
@@ -781,5 +866,87 @@ describe("metadata presentation", () => {
       session_id: "session-1",
       playing: false,
     });
+  });
+
+  it("announces clip, frame, and time for a painted preview", async () => {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    render({ model, el: element, signal: new AbortController().signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 240,
+      fps_num: 24000,
+      fps_den: 1001,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 4,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+    await vi.waitFor(() =>
+      expect(element.querySelector("[data-clip-id='Source'] canvas")).not.toBeNull(),
+    );
+    const frameInput = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Current frame']",
+    );
+    if (frameInput === null) {
+      throw new Error("Missing frame input.");
+    }
+    frameInput.value = "24";
+    frameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    model.emit(
+      {
+        protocol: 1,
+        type: "frame_set",
+        session_id: "session-1",
+        request_id: 1,
+        generation: 1,
+        frame: 24,
+        frames: [
+          {
+            clip_id: "Source",
+            buffer_index: 0,
+            mime: "image/jpeg",
+            byte_length: 1,
+            render_ms: 1,
+            encode_ms: 1,
+          },
+        ],
+      },
+      [new DataView(new Uint8Array([1]).buffer)],
+    );
+
+    await vi.waitFor(() =>
+      expect(
+        element
+          .querySelector("[data-clip-id='Source'] canvas")
+          ?.getAttribute("aria-label"),
+      ).toBe("Source, frame 24, time 00:00:01.001"),
+    );
+    expect(element.getAttribute("role")).toBe("region");
+    expect(element.getAttribute("aria-label")).toBe("Kaleidoscope video preview");
   });
 });
