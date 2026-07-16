@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  FrameRequestSequence,
   PausedSeekScheduler,
   PlaybackClock,
 } from "../../frontend/scheduler.js";
@@ -158,6 +159,42 @@ describe("PausedSeekScheduler", () => {
       { request_id: 3, generation: 1, frame: 4, reason: "seek" },
       { request_id: 4, generation: 1, frame: 5, reason: "playback" },
       { request_id: 5, generation: 2, frame: 0, reason: "playback" },
+    ]);
+  });
+
+  it("continues request identities when an active view hands off", () => {
+    const sequence = new FrameRequestSequence();
+    const firstViewMessages: unknown[] = [];
+    const secondViewMessages: unknown[] = [];
+    const firstView = new PausedSeekScheduler({
+      sessionId: "session-1",
+      numFrames: 100,
+      clipIds: ["Source"],
+      sequence,
+      send: (message) => firstViewMessages.push(message),
+    });
+
+    firstView.requestExact(2);
+    firstView.requestPlayback(3);
+    firstView.close();
+
+    const secondView = new PausedSeekScheduler({
+      sessionId: "session-1",
+      numFrames: 100,
+      clipIds: ["Source"],
+      sequence,
+      send: (message) => secondViewMessages.push(message),
+    });
+    secondView.requestExact(8);
+    secondView.requestPlayback(9);
+
+    expect(firstViewMessages).toMatchObject([
+      { request_id: 0, generation: 0, frame: 2 },
+      { request_id: 1, generation: 0, frame: 3 },
+    ]);
+    expect(secondViewMessages).toMatchObject([
+      { request_id: 2, generation: 1, frame: 8 },
+      { request_id: 3, generation: 1, frame: 9 },
     ]);
   });
 

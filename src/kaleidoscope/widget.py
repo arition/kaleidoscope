@@ -62,6 +62,9 @@ class PreviewWidget(anywidget.AnyWidget):
         self._view_active_clip_ids = (
             tuple(config.active_clip_ids) if config is not None else ()
         )
+        self._view_overlay_opacity = (
+            getattr(config, "overlay_opacity", 0.5) if config is not None else 0.5
+        )
         self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
             "awaiting_ready"
         )
@@ -81,18 +84,22 @@ class PreviewWidget(anywidget.AnyWidget):
             self._session.close()
         self.send(error_message(self.session_id, error))
 
-    def _metadata_payload(self) -> PreviewMetadataPayload | None:
+    def _metadata_payload(
+        self,
+        *,
+        autoplay: bool | None = None,
+    ) -> PreviewMetadataPayload | None:
         if self._config is None:
             return None
         return {
             "num_frames": self._config.num_frames,
             "fps_num": self._config.fps.numerator,
             "fps_den": self._config.fps.denominator,
-            "mode": self._config.mode,
-            "active_clip_ids": list(self._config.active_clip_ids),
-            "overlay_opacity": self._config.overlay_opacity,
+            "mode": self._view_mode,
+            "active_clip_ids": list(self._view_active_clip_ids),
+            "overlay_opacity": self._view_overlay_opacity,
             "max_visible_clips": self._config.max_visible_clips,
-            "autoplay": self._config.autoplay,
+            "autoplay": self._config.autoplay if autoplay is None else autoplay,
             "clips": [
                 {
                     "id": clip.id,
@@ -121,17 +128,6 @@ class PreviewWidget(anywidget.AnyWidget):
         buffers: list[memoryview],
     ) -> None:
         del buffers
-        if self._frontend_state == "terminal":
-            self.send(
-                error_message(
-                    self.session_id,
-                    ProtocolError(
-                        "invalid_message",
-                        "Preview session is no longer accepting frontend messages.",
-                    ),
-                )
-            )
-            return
         try:
             message = parse_frontend_message(content)
             if message["session_id"] != self.session_id:
@@ -143,15 +139,24 @@ class PreviewWidget(anywidget.AnyWidget):
             self._reject_frontend_message(protocol_error)
             return
 
-        if message["type"] == "ready":
-            if self._frontend_state != "awaiting_ready":
-                self._reject_frontend_message(
+        if message["type"] == "close":
+            self.close()
+            return
+
+        if self._frontend_state == "terminal":
+            self.send(
+                error_message(
+                    self.session_id,
                     ProtocolError(
                         "invalid_message",
-                        "The ready handshake has already completed.",
-                    )
+                        "Preview session is no longer accepting frontend messages.",
+                    ),
                 )
-                return
+            )
+            return
+
+        if message["type"] == "ready":
+            first_ready = self._frontend_state == "awaiting_ready"
             if not message["capabilities"]["image_bitmap"]:
                 self._reject_frontend_message(
                     ProtocolError(
@@ -173,9 +178,17 @@ class PreviewWidget(anywidget.AnyWidget):
                     )
                 )
                 return
-            self._frontend_state = "ready"
-            self.set_trait("status", "ready")
-            self.send(metadata_message(self.session_id, self._metadata_payload()))
+            if first_ready:
+                self._frontend_state = "ready"
+                self.set_trait("status", "ready")
+            self.send(
+                metadata_message(
+                    self.session_id,
+                    self._metadata_payload(autoplay=None if first_ready else False),
+                )
+            )
+            if not first_ready and self._session is not None:
+                self._session.resend_unacknowledged()
             return
 
         if self._frontend_state != "ready":
@@ -296,6 +309,7 @@ class PreviewWidget(anywidget.AnyWidget):
         self._view_generation = generation
         self._view_mode = mode
         self._view_active_clip_ids = clip_ids
+        self._view_overlay_opacity = message["overlay_opacity"]
         self.set_trait("mode", mode)
         self.set_trait("active_clip_ids", list(clip_ids))
 

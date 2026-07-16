@@ -1,6 +1,7 @@
 import { render } from "/src/kaleidoscope/static/index.js";
 
 const sessionId = "browser-session";
+const widgetManager = {};
 const messages = [];
 let messageHandler;
 const showConversionWarning = new URLSearchParams(window.location.search).has(
@@ -42,6 +43,7 @@ const emit = (message, buffers = []) => {
 };
 
 const model = {
+  widget_manager: widgetManager,
   get(key) {
     return key === "session_id" ? sessionId : undefined;
   },

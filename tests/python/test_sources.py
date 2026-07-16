@@ -162,6 +162,52 @@ def test_registry_is_snapshotted_sorted_and_ignores_audio() -> None:
     assert [item.node for item in config.clips] == [first, second]
 
 
+def test_registry_selection_ignores_unselected_incompatible_outputs() -> None:
+    first = FakeVideoNode()
+    second = FakeVideoNode()
+    incompatible = FakeVideoNode(num_frames=1)
+    outputs: dict[int, object] = {
+        3: FakeVideoOutput(incompatible),
+        9: FakeVideoOutput(second),
+        5: FakeVideoOutput(first),
+    }
+
+    config = build_preview_config(
+        None,
+        output_ids=[9, 5],
+        runtime=make_runtime(outputs),
+    )
+
+    assert [(item.id, item.label) for item in config.clips] == [
+        (9, "Output 9"),
+        (5, "Output 5"),
+    ]
+    assert [item.node for item in config.clips] == [second, first]
+
+
+def test_registry_selection_rejects_unknown_or_non_video_outputs() -> None:
+    runtime = make_runtime({2: FakeAudioNode()})
+
+    with pytest.raises(KaleidoscopeError) as missing:
+        build_preview_config(None, output_ids=[3], runtime=runtime)
+    with pytest.raises(KaleidoscopeError) as audio:
+        build_preview_config(None, output_ids=[2], runtime=runtime)
+
+    assert missing.value.code == "invalid_clip"
+    assert audio.value.code == "invalid_clip"
+
+
+def test_registry_selection_requires_registered_output_discovery() -> None:
+    with pytest.raises(KaleidoscopeError) as error:
+        build_preview_config(
+            FakeVideoNode(),
+            output_ids=[0],
+            runtime=make_runtime(),
+        )
+
+    assert error.value.code == "invalid_clip"
+
+
 def test_registry_without_video_outputs_is_rejected() -> None:
     with pytest.raises(KaleidoscopeError) as error:
         build_preview_config(

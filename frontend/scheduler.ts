@@ -198,11 +198,37 @@ export interface FrameRequestIdentity {
   frame: number;
 }
 
+export class FrameRequestSequence {
+  private nextRequestId = 0;
+  private nextGeneration = 0;
+
+  takeRequestId(): number {
+    const requestId = this.nextRequestId;
+    this.nextRequestId += 1;
+    return requestId;
+  }
+
+  advanceGeneration(): number {
+    const generation = this.nextGeneration;
+    this.nextGeneration += 1;
+    return generation;
+  }
+
+  get generation(): number {
+    return Math.max(0, this.nextGeneration - 1);
+  }
+
+  get pendingRequestId(): number {
+    return this.nextRequestId;
+  }
+}
+
 interface PausedSeekSchedulerOptions {
   sessionId: string;
   numFrames: number;
   clipIds: ClipId[];
   send: (message: RequestFrameSetMessage) => void;
+  sequence?: FrameRequestSequence;
   schedule?: (callback: FrameRequestCallback) => number;
   cancel?: (handle: number) => void;
 }
@@ -227,10 +253,9 @@ export class PausedSeekScheduler {
   private readonly numFrames: number;
   private clipIds: ClipId[];
   private readonly send: (message: RequestFrameSetMessage) => void;
+  private readonly sequence: FrameRequestSequence;
   private readonly schedule: (callback: FrameRequestCallback) => number;
   private readonly cancel: (handle: number) => void;
-  private nextRequestId = 0;
-  private nextGeneration = 0;
   private scheduledHandle: number | undefined;
   private scheduledToken = 0;
   private pendingFrame = 0;
@@ -241,12 +266,13 @@ export class PausedSeekScheduler {
     this.numFrames = options.numFrames;
     this.clipIds = [...options.clipIds];
     this.send = options.send;
+    this.sequence = options.sequence ?? new FrameRequestSequence();
     this.schedule = options.schedule ?? scheduleFrame;
     this.cancel = options.cancel ?? cancelFrame;
   }
 
   get generation(): number {
-    return Math.max(0, this.nextGeneration - 1);
+    return this.sequence.generation;
   }
 
   private clamp(frame: number): number {
@@ -270,14 +296,14 @@ export class PausedSeekScheduler {
     reason: "seek" | "playback",
   ): FrameRequestIdentity {
     const identity = {
-      request_id: this.nextRequestId,
+      request_id: this.sequence.pendingRequestId,
       generation,
       frame: this.clamp(frame),
     };
     if (this.closed) {
       return identity;
     }
-    this.nextRequestId += 1;
+    this.sequence.takeRequestId();
     this.send(
       createFrameSetRequest(
         this.sessionId,
@@ -293,19 +319,15 @@ export class PausedSeekScheduler {
 
   requestExact(frame: number): FrameRequestIdentity {
     this.cancelScheduledScrub();
-    const generation = this.nextGeneration;
-    this.nextGeneration += 1;
+    const generation = this.sequence.advanceGeneration();
     return this.sendRequest(frame, generation, "seek");
   }
 
   requestPlayback(frame: number, restart = false): FrameRequestIdentity {
     this.cancelScheduledScrub();
     const generation = restart
-      ? this.nextGeneration
-      : Math.max(0, this.nextGeneration - 1);
-    if (restart) {
-      this.nextGeneration += 1;
-    }
+      ? this.sequence.advanceGeneration()
+      : this.sequence.generation;
     return this.sendRequest(frame, generation, "playback");
   }
 
@@ -315,8 +337,7 @@ export class PausedSeekScheduler {
     announce: (generation: number) => void,
   ): FrameRequestIdentity {
     this.cancelScheduledScrub();
-    const generation = this.nextGeneration;
-    this.nextGeneration += 1;
+    const generation = this.sequence.advanceGeneration();
     this.clipIds = [...clipIds];
     announce(generation);
     return this.sendRequest(frame, generation, "seek");

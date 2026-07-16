@@ -26,6 +26,22 @@ def test_parse_frontend_message_accepts_protocol_v1_ready() -> None:
     assert message["capabilities"] == {"image_bitmap": True, "webp": False}
 
 
+def test_parse_frontend_message_accepts_session_close() -> None:
+    message = parse_frontend_message(
+        {
+            "protocol": 1,
+            "type": "close",
+            "session_id": "session-1",
+        }
+    )
+
+    assert message == {
+        "protocol": 1,
+        "type": "close",
+        "session_id": "session-1",
+    }
+
+
 def test_parse_frontend_message_rejects_incompatible_protocol() -> None:
     with pytest.raises(ProtocolError) as error:
         parse_frontend_message(

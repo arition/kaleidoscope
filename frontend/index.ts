@@ -1,6 +1,7 @@
 import type { RenderProps } from "@anywidget/types";
 
 import {
+  createCloseMessage,
   createFrameSetAck,
   createReadyMessage,
   createSetPlayingMessage,
@@ -18,6 +19,7 @@ import type { ComparisonState } from "./comparison.js";
 import { paintFrameSet, renderMetadata } from "./player.js";
 import type { PlayerView } from "./player.js";
 import {
+  FrameRequestSequence,
   PausedSeekScheduler,
   PlaybackController,
 } from "./scheduler.js";
@@ -35,6 +37,58 @@ function createStatus(text: string): HTMLElement {
 type KaleidoscopeRenderProps = Pick<RenderProps, "model" | "el" | "signal">;
 
 const MAX_ACTIVE_DECODE_SETS = 2;
+
+interface CoordinatedView {
+  activate(): void;
+  deactivate(): void;
+}
+
+interface ModelCoordinator {
+  active: CoordinatedView | undefined;
+  currentFrame: number;
+  sequence: FrameRequestSequence;
+  views: Set<CoordinatedView>;
+}
+
+const modelCoordinators = new WeakMap<object, Map<string, ModelCoordinator>>();
+
+function coordinatorFor(
+  model: KaleidoscopeRenderProps["model"],
+  sessionId: string,
+): ModelCoordinator {
+  let managerCoordinators = modelCoordinators.get(model.widget_manager);
+  if (managerCoordinators === undefined) {
+    managerCoordinators = new Map();
+    modelCoordinators.set(model.widget_manager, managerCoordinators);
+  }
+  const existing = managerCoordinators.get(sessionId);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const modelFrame = model.get("current_frame");
+  const coordinator: ModelCoordinator = {
+    active: undefined,
+    currentFrame:
+      typeof modelFrame === "number" && Number.isSafeInteger(modelFrame)
+        ? Math.max(0, modelFrame)
+        : 0,
+    sequence: new FrameRequestSequence(),
+    views: new Set(),
+  };
+  managerCoordinators.set(sessionId, coordinator);
+  return coordinator;
+}
+
+function deleteCoordinator(
+  model: KaleidoscopeRenderProps["model"],
+  sessionId: string,
+): void {
+  const managerCoordinators = modelCoordinators.get(model.widget_manager);
+  managerCoordinators?.delete(sessionId);
+  if (managerCoordinators?.size === 0) {
+    modelCoordinators.delete(model.widget_manager);
+  }
+}
 
 function isCommLive(model: KaleidoscopeRenderProps["model"]): boolean {
   const commLive = (
@@ -75,6 +129,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     status.textContent = "Protocol error: missing session identifier.";
     return;
   }
+  const coordinator = coordinatorFor(model, sessionId);
 
   let metadata: PreviewMetadataMessage | undefined;
   let comparisonState: ComparisonState | undefined;
@@ -110,6 +165,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   let disconnected = false;
   let terminal = false;
   let terminalStatus = "Preview session is no longer available.";
+  let closeSent = false;
 
   const interactionBlocked = (): boolean => disconnected || terminal;
 
@@ -133,6 +189,14 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     if (liveStatus !== null) {
       liveStatus.textContent = text;
     }
+  };
+
+  const sendClose = (): void => {
+    if (closeSent || !isCommLive(model)) {
+      return;
+    }
+    closeSent = true;
+    model.send(createCloseMessage(sessionId));
   };
 
   const setCurrentRequest = (
@@ -196,6 +260,26 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     playbackController?.toggle();
   };
 
+  const enterTerminal = (text: string, closeBackend: boolean): void => {
+    terminal = true;
+    terminalStatus = text;
+    autoplayPending = false;
+    deferredDecodeRetry = undefined;
+    resumeAfterPaint = undefined;
+    resumeAfterScrub = false;
+    resumeAfterVisibility = false;
+    comparisonFramePending = false;
+    comparisonFrameRequired = false;
+    setCurrentRequest(undefined);
+    playbackController?.pause(false);
+    playbackController?.close();
+    seekScheduler?.close();
+    if (closeBackend) {
+      sendClose();
+    }
+    updateStatus(text);
+  };
+
   const handleMessage = async (
     value: unknown,
     buffers: DataView[],
@@ -205,6 +289,24 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       if (message.session_id !== sessionId) {
         throw new ProtocolError("invalid_message", "Backend message has an unknown session.");
       }
+      if (
+        message.type === "frame_set" &&
+        (metadata === undefined || playerView === undefined)
+      ) {
+        lastAcknowledgedRequestId = Math.max(
+          lastAcknowledgedRequestId,
+          message.request_id,
+        );
+        model.send(
+          createFrameSetAck(
+            sessionId,
+            message.request_id,
+            message.generation,
+            "stale",
+          ),
+        );
+        return;
+      }
       if (message.type === "metadata") {
         if ("clips" in message) {
           metadata = message;
@@ -213,6 +315,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             sessionId,
             numFrames: message.num_frames,
             clipIds: message.active_clip_ids,
+            sequence: coordinator.sequence,
             send: (request) => {
               setCurrentRequest(request);
               if (comparisonFrameRequired) {
@@ -372,7 +475,9 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
               model.send(createSetPlayingMessage(sessionId, playing)),
           });
           autoplayPending = message.autoplay;
-          seekScheduler.requestExact(0);
+          seekScheduler.requestExact(
+            Math.min(message.num_frames - 1, coordinator.currentFrame),
+          );
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
@@ -496,7 +601,12 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           resumeAfterPaint = undefined;
           setCurrentRequest(undefined);
           playbackController?.pause(false);
-          throw error;
+          updateStatus(
+            error instanceof Error
+              ? `Frame decode error: ${error.message}`
+              : "Frame decode error.",
+          );
+          return;
         } finally {
           activeDecodeSets -= 1;
           retryDeferredDecode();
@@ -504,6 +614,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         if (painted) {
           comparisonFramePending = false;
           comparisonFrameRequired = false;
+          coordinator.currentFrame = message.frame;
           playbackController?.setCurrentFrame(message.frame);
           updateStatus(`Frame ${message.frame} ready.`);
           acknowledge("painted");
@@ -550,20 +661,13 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           ? `Protocol error: ${message.message}`
           : `${clip.label}: ${message.message}`;
       if (!message.recoverable) {
-        terminal = true;
-        terminalStatus = errorStatus;
-        autoplayPending = false;
-        deferredDecodeRetry = undefined;
-        resumeAfterPaint = undefined;
-        resumeAfterScrub = false;
-        resumeAfterVisibility = false;
-        setCurrentRequest(undefined);
-        playbackController?.pause(false);
+        enterTerminal(errorStatus, false);
+        return;
       }
       updateStatus(errorStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid backend message.";
-      updateStatus(`Protocol error: ${message}`);
+      enterTerminal(`Protocol error: ${message}`, true);
     }
   };
 
@@ -571,7 +675,6 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     void handleMessage(value, buffers);
   };
 
-  model.on("msg:custom", onMessage);
   const onCommLiveUpdate = (): void => {
     if (isCommLive(model)) {
       return;
@@ -586,8 +689,6 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     playbackController?.pause(false);
     updateStatus("Kernel disconnected. Preview paused.");
   };
-  model.on("change:comm_live", onCommLiveUpdate);
-  model.on("comm_live_update", onCommLiveUpdate);
   const onVisibilityChange = (): void => {
     if (document.visibilityState === "hidden") {
       if (playbackController?.playing) {
@@ -600,45 +701,90 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       playWhenVisible();
     }
   };
-  document.addEventListener("visibilitychange", onVisibilityChange, {
-    signal,
-  });
-  signal.addEventListener(
-    "abort",
-    () => {
+  let active = false;
+  const coordinatedView: CoordinatedView = {
+    activate: () => {
+      if (active || signal.aborted) {
+        return;
+      }
+      active = true;
+      updateStatus("Initializing Kaleidoscope...");
+      model.on("msg:custom", onMessage);
+      model.on("change:comm_live", onCommLiveUpdate);
+      model.on("comm_live_update", onCommLiveUpdate);
+      document.addEventListener("visibilitychange", onVisibilityChange, {
+        signal,
+      });
+
+      const imageBitmap = typeof globalThis.createImageBitmap === "function";
+      if (!imageBitmap) {
+        model.send(
+          createReadyMessage(sessionId, {
+            image_bitmap: false,
+            webp: false,
+          }),
+        );
+        return;
+      }
+      void supportsWebp().then((webp) => {
+        if (!active || signal.aborted) {
+          return;
+        }
+        model.send(
+          createReadyMessage(sessionId, {
+            image_bitmap: true,
+            webp,
+          }),
+        );
+      });
+    },
+    deactivate: () => {
+      if (!active) {
+        return;
+      }
+      active = false;
       deferredDecodeRetry = undefined;
       setCurrentRequest(undefined);
+      playbackController?.pause(false);
       playbackController?.close();
       seekScheduler?.close();
-      // Any not-yet-delivered request is released by the widget/session close
-      // that owns this abort signal; only received deliveries can be ACKed here.
       model.off("msg:custom", onMessage);
       model.off("change:comm_live", onCommLiveUpdate);
       model.off("comm_live_update", onCommLiveUpdate);
     },
+  };
+
+  coordinator.views.add(coordinatedView);
+  if (coordinator.active === undefined) {
+    coordinator.active = coordinatedView;
+    coordinatedView.activate();
+  } else {
+    updateStatus("Preview is active in another view.");
+  }
+
+  signal.addEventListener(
+    "abort",
+    () => {
+      const wasActive = coordinator.active === coordinatedView;
+      coordinatedView.deactivate();
+      coordinator.views.delete(coordinatedView);
+      if (wasActive) {
+        coordinator.active = undefined;
+        const next = coordinator.views.values().next().value as
+          | CoordinatedView
+          | undefined;
+        if (next !== undefined) {
+          coordinator.active = next;
+          next.activate();
+        }
+      }
+      if (coordinator.views.size === 0) {
+        deleteCoordinator(model, sessionId);
+        sendClose();
+      }
+    },
     { once: true },
   );
-
-  const imageBitmap = typeof globalThis.createImageBitmap === "function";
-  if (!imageBitmap) {
-    model.send(
-      createReadyMessage(sessionId, {
-        image_bitmap: false,
-        webp: false,
-      }),
-    );
-    return;
-  }
-  void supportsWebp().then((webp) => {
-    if (!signal.aborted) {
-      model.send(
-        createReadyMessage(sessionId, {
-          image_bitmap: true,
-          webp,
-        }),
-      );
-    }
-  });
 }
 
 export default { render };

@@ -1,7 +1,7 @@
 # Kaleidoscope: Real-Time VapourSynth Preview for Jupyter
 
-Status: G1 approved; Task 7 authorized
-Spec revision: 0.5 approved
+Status: G1 approved; Task 12 complete; Task 13 authorized
+Spec revision: 0.6 approved
 Research baseline: July 2026
 
 ## 1. Approval Gate
@@ -12,6 +12,11 @@ The user delegated unanswered product decisions to the implementer. Those decisi
 
 Revision 0.5 records the Task 6 benchmark selections plus the requested configurable JPEG/WebP policy and source-resolution-only rendering. They are implemented, measured, and approved at G1; Task 7 may proceed.
 
+Revision 0.6 records the Task 12 collision review: the publishable distribution
+is `vapoursynth-kaleidoscope`, the import package remains `kaleidoscope`, and
+the official VapourSynth R77 package is a declared dependency on supported
+platforms.
+
 Approval should confirm these consequential choices:
 
 1. Build a portable inline Jupyter widget rather than a Jupyter server extension.
@@ -21,7 +26,8 @@ Approval should confirm these consequential choices:
 5. Expect callers to supply `RGB24` clips; provide automatic RGB24 conversion only as a visible, warned fallback.
 6. Stream an atomic set of individually encoded preview frames using caller-selected JPEG or WebP, with JPEG quality 80 as the measured default, rather than a continuous video stream.
 7. Treat "real time" as clock-correct playback with bounded latency and frame dropping, not guaranteed full-rate rendering for every VapourSynth graph.
-8. Use the proposed package name `kaleidoscope` and MIT license.
+8. Use the distribution name `vapoursynth-kaleidoscope`, the Python import
+    package `kaleidoscope`, and the MIT license.
 
 ## 2. Objective
 
@@ -97,7 +103,9 @@ It does not mean that an arbitrarily expensive VapourSynth graph is guaranteed t
 - Offer codec-specific compression controls through Python options.
 - Preserve each clip's original resolution; users resize explicitly in their VapourSynth graph when a smaller preview is desired.
 - Surface loading, buffering, end-of-clip, disconnected-kernel, and render-error states.
-- Dispose resources when the widget closes or its view is removed.
+- Dispose per-view resources when a view is removed, hand active ownership to a
+    surviving view, and close backend resources after explicit widget close or
+    removal of the final live view.
 - Support multiple independent players in one kernel, within configured resource limits.
 
 ### 3.2 Explicit non-goals for MVP
@@ -145,6 +153,7 @@ Codec: TypeAlias = Literal["jpeg", "webp"]
 def preview(
     clips: ClipInput | None = None,
     *,
+    output_ids: Sequence[int] | None = None,
     mode: ComparisonMode = "auto",
     primary: ClipId | None = None,
     secondary: ClipId | None = None,
@@ -166,6 +175,7 @@ Validation rules:
 
 - `clips` may be one `VideoNode`, an ordered sequence, or an insertion-ordered mapping from a unique string/integer ID to a `VideoNode`.
 - `clips=None` snapshots `vapoursynth.get_outputs()`, sorts integer output indices, keeps video outputs, and uses labels such as `Output 0`. Registered audio outputs are ignored with a debug log entry; no video outputs is an error.
+- `output_ids` is valid only with `clips=None`. It must be a non-empty sequence of unique non-negative integers, and every selected ID must identify a registered video output in that snapshot.
 - Output discovery does not mutate the VapourSynth registry and is not live. Outputs added or replaced later require a new widget.
 - Every clip must have known, positive `num_frames`, width, height, constant format, and constant FPS. The MVP rejects variable-format or variable-resolution clips with a clear error.
 - Callers are expected to perform color conversion explicitly and supply `RGB24` when they need control over matrix, transfer, range, chroma handling, dithering, or other conversion details.
@@ -243,8 +253,10 @@ Shortcuts must not intercept notebook commands when the player is unfocused. Eve
 
 - Playback pauses when the document becomes hidden; automatic resume occurs only if playback was active before hiding.
 - The frontend registers all custom-message listeners, probes WebP through `createImageBitmap()` when available, and then sends `ready` with the measured capabilities. Python must not send metadata or accept frame requests before this handshake because early custom messages can be lost and codec support has not been negotiated.
-- A malformed message, incompatible protocol, unsupported decoder/codec, duplicate `ready`, or frame request before `ready` moves the widget to a terminal error state, closes its preview session, and prevents later traffic from starting render work.
+- A later valid `ready` is an active-view resynchronization, not a duplicate-handshake error. Python sends current metadata with autoplay disabled and replays the current unacknowledged delivery without opening a second delivery window.
+- A malformed message, incompatible protocol, unsupported decoder/codec, or frame request before the first `ready` moves the widget to a terminal error state, closes its preview session, and prevents later traffic from starting render work.
 - The frontend uses the lifecycle `AbortSignal` supplied by anywidget for DOM listeners and unregisters model listeners on abort.
+- Views of the same widget model coordinate through stable widget-manager/session identity. Exactly one view is active; removing it releases only that view and hands the shared current frame and request sequence to a surviving view. Removing the final view sends `close` while the comm is live.
 - Closing the widget marks the session closed, clears all per-clip encoded-frame caches, ignores late futures, and releases held `VideoFrame`, frame-set, and image resources.
 - Kernel disconnect places the player in a paused disconnected state while retaining the last complete painted frame set.
 
@@ -400,9 +412,11 @@ Use a latest-request-wins scheduler with bounded work:
 - Backend maintains at most `max_in_flight` submitted clip-frame futures per session and schedules active clips fairly so one graph cannot permanently starve another.
 - Playback requests favor the newest desired frame set. Queued but unsubmitted obsolete sets are replaced as a unit.
 - Exact paused seeks have higher priority than speculative playback prefetch.
-- Frontend permits at most one unacknowledged delivered frame set by default.
+- Frontend permits exactly one unacknowledged delivered frame set.
 - Backend sends a set only after every requested clip has encoded successfully and the delivery window has capacity.
 - Frontend ACKs a set with outcome `painted`, `stale`, or `decode_error`.
+- An ACK must match the request ID and generation of the one retained delivery. `painted` and `stale` release the window and promote the latest pending delivery; `decode_error` releases the window and discards the pending delivery.
+- A repeated valid `ready` causes the backend to replay the retained delivery without changing window state. The frontend ignores a replay already being processed or already ACKed, and ACKs an obsolete new delivery as `stale`.
 - A decode error pauses playback and produces a recoverable error state.
 - Optional prefetch is limited to the next sequential frame set and enabled only when measured latency and queue capacity justify it.
 
@@ -440,13 +454,14 @@ Frontend to Python:
 Python to frontend:
 
 ```json
-{"protocol":1,"type":"metadata","session_id":"...","num_frames":2400,"fps_num":24000,"fps_den":1001,"mode":"overlay","active_clip_ids":["Source","Filtered"],"overlay_opacity":0.5,"clips":[{"id":"Source","label":"Source","source_format":"RGB24","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[]},{"id":"Filtered","label":"Filtered","source_format":"YUV420P10","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[{"code":"automatic_rgb24_conversion","message":"YUV420P10 is being converted automatically for preview; convert to RGB24 explicitly for controlled color handling."}]}],"max_visible_clips":4}
+{"protocol":1,"type":"metadata","session_id":"...","num_frames":2400,"fps_num":24000,"fps_den":1001,"mode":"overlay","active_clip_ids":["Source","Filtered"],"overlay_opacity":0.5,"clips":[{"id":"Source","label":"Source","source_format":"RGB24","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[]},{"id":"Filtered","label":"Filtered","source_format":"YUV420P10","source_width":1920,"source_height":1080,"output_width":1920,"output_height":1080,"warnings":[{"code":"automatic_rgb24_conversion","message":"YUV420P10 is being converted automatically for preview; convert to RGB24 explicitly for controlled color handling."}]}],"max_visible_clips":4,"autoplay":false}
 {"protocol":1,"type":"frame_set","session_id":"...","request_id":42,"generation":3,"frame":120,"frames":[{"clip_id":"Source","buffer_index":0,"mime":"image/jpeg","byte_length":81234,"render_ms":18.2,"encode_ms":5.7},{"clip_id":"Filtered","buffer_index":1,"mime":"image/jpeg","byte_length":85678,"render_ms":24.1,"encode_ms":5.9}]}
 {"protocol":1,"type":"error","session_id":"...","request_id":42,"generation":3,"clip_id":"Filtered","code":"render_failed","message":"...","recoverable":true}
-{"protocol":1,"type":"closed","session_id":"..."}
 ```
 
 The `frame_set` message contains one binary buffer for each manifest entry, indexed by `buffer_index`. Receivers must validate protocol version, message shape, frame bounds, session, generation, requested clip IDs and order, unique buffer indices, declared byte lengths, total payload limit, and MIME types before decoding. Unknown message types, incompatible protocol versions, and messages that violate the handshake state produce a visible terminal error and close the backend preview session.
+
+`close` is frontend-to-Python only. Backend closure is represented by the synchronized `status="closed"` trait and comm/widget closure; protocol v1 has no Python-to-frontend `closed` custom message.
 
 ### 6.10 State model
 
@@ -486,24 +501,26 @@ Avoid a general event bus, dependency-injection framework, or plugin system in t
 | Package/platform | Proposed constraint | Purpose | Notes |
 | --- | --- | --- | --- |
 | Python | `>=3.12` | Kernel runtime | Matches VapourSynth 77 requirement. |
-| VapourSynth | `>=77,<78` initially | Frame graph and async retrieval | User/environment dependency; do not bundle native plugins. Widen after compatibility testing. |
+| VapourSynth | `>=77,<78` initially | Frame graph and async retrieval | Declare the official package dependency; do not bundle third-party plugins. Widen after compatibility testing. |
 | anywidget | `>=0.11,<0.12` | Portable Jupyter widget | Provides custom binary messages and lifecycle signal. |
 | traitlets | `>=5.15,<6` | Low-rate synchronized widget state | anywidget dependency, declared only if imported directly. |
 | Pillow | `>=12.1,<13` | JPEG/WebP encoding | JPEG 4:2:0 quality 80 is the measured default; WebP lossy/lossless is selectable. Verify WebP support in CI. |
 | NumPy | `>=2.4,<3` | Plane interleave and stride-safe conversion | T6 selects it for a measured 3.71x 720p interleave speedup, pending G1. |
 | Browser APIs | Canvas, Blob, `createImageBitmap`, Fullscreen, Page Visibility | Decode, paint, lifecycle | `createImageBitmap` is mandatory in MVP and negotiated before metadata/rendering. |
 
-The package must not install VapourSynth system libraries or third-party source/resize plugins. Installation documentation should explain that a working VapourSynth environment is prerequisite.
+The package may install the official VapourSynth R77 distribution on supported
+platforms. It must not install third-party source, resize, or conversion plugins.
+Installation documentation should explain how custom VapourSynth environments
+and plugins remain user-managed prerequisites.
 
 ### 7.2 Build and development
 
 | Tool | Purpose |
 | --- | --- |
-| Hatch + Hatchling | Python environment, build, and release management. |
-| `hatch-jupyter-builder` | Build the frontend before wheel/sdist packaging. |
+| Hatch + Hatchling | Python environment, archive build, and release management. Wheels and sdists package the committed frontend assets without invoking npm. |
 | npm with a committed lockfile | Frontend dependency and reproducible build management. |
 | TypeScript with strict mode | Frontend implementation and protocol typing. |
-| esbuild | Bundle framework-free TypeScript and local assets to a single ESM file. |
+| esbuild | Bundle framework-free TypeScript and local assets to committed ESM and CSS files before archive builds. |
 | `@anywidget/types` | Compile-time widget model/render types. |
 | Ruff | Python formatting and linting. |
 | mypy or Pyright | Python static checking; choose one at scaffold time based on clean VS typing support. |
@@ -518,7 +535,8 @@ The frontend should be framework-free for the MVP. React would add bundle/runtim
 
 ### 7.3 Packaging and licensing
 
-- **Proposed distribution name:** `kaleidoscope`, subject to PyPI availability and collision review.
+- **Distribution name:** `vapoursynth-kaleidoscope`, selected after PyPI
+    collision review found `kaleidoscope` belongs to an unrelated project.
 - Python import package: `kaleidoscope`.
 - **Proposed license:** MIT.
 - Bundle ESM, CSS, and any icons/fonts inside the wheel; no network fetches at runtime.
@@ -769,11 +787,13 @@ T6 publishes the summarized result in `tasks/benchmark-report.md` and raw sample
 
 ### 12.6 Packaging tests
 
-- Build wheel and sdist.
-- Inspect artifacts to ensure bundled ESM/CSS are present and frontend source/node modules are not unintentionally shipped.
-- Install each artifact in a clean environment.
-- Import package, instantiate single-clip and two-output synthetic widgets, and render smoke frame sets.
-- Verify no runtime network request is needed.
+- Build wheel and sdist into a dedicated artifact directory without deleting unrelated repository output.
+- Require exact wheel and sdist member manifests, compare every source-managed file byte-for-byte, and verify every wheel `RECORD` hash and size.
+- Prepare a local dependency wheelhouse as a separate, explicitly networked phase.
+- Install each artifact sequentially in a fresh environment using isolated PEP 517 builds, `--no-index`, and the local wheelhouse.
+- Under a native inherited Linux process-tree guard that permits only Unix-domain `socket()` and `socketpair()` creation and denies other socket families, x32 syscall-number bypasses, and `io_uring`, import the installed package, execute the shipped notebook in a real IPC Jupyter kernel, and render exact installed ESM/CSS plus installed-backend frame bytes in Chromium.
+- Verify the notebook produces widget-view MIME outputs without persisted frame buffers, and verify Chromium paints single and two-output comparisons without external requests or console errors.
+- Export the staged Git index, rebuild wheel and sdist from that clean tree, and repeat exact artifact inspection plus installed wheel/sdist smoke tests before committing Task 12.
 
 ### 12.7 Coverage policy
 
@@ -870,7 +890,7 @@ Before implementation, the reviewer should approve or amend:
 - [x] Single-clip 720p and two-clip 540p playback/latency acceptance targets.
 - [x] NumPy as a provisional runtime dependency.
 - [x] Lucide as a provisional bundled icon dependency.
-- [x] `kaleidoscope` package/distribution name.
+- [x] `vapoursynth-kaleidoscope` distribution name and `kaleidoscope` import package.
 - [x] MIT license.
 - [x] Planned milestones and testing strategy.
 

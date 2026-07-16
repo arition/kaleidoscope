@@ -185,22 +185,60 @@ def _is_clip_id(value: object) -> bool:
 def _normalize_inputs(
     clips: object | None,
     runtime: VapourSynthRuntime,
+    output_ids: Sequence[int] | None,
 ) -> tuple[tuple[ClipId, str, object], ...]:
     if clips is None:
         snapshot = dict(runtime.get_outputs())
         normalized: list[tuple[ClipId, str, object]] = []
-        for output_id in sorted(snapshot):
-            output = snapshot[output_id]
+        selected_output_ids: Sequence[int]
+        if output_ids is None:
+            selected_output_ids = sorted(snapshot)
+        else:
+            if not output_ids or any(
+                not isinstance(output_id, int)
+                or isinstance(output_id, bool)
+                or output_id < 0
+                for output_id in output_ids
+            ):
+                raise KaleidoscopeError(
+                    "invalid_clip",
+                    "output_ids must contain one or more non-negative integers.",
+                )
+            if len(set(output_ids)) != len(output_ids):
+                raise KaleidoscopeError(
+                    "duplicate_clip_id",
+                    "output_ids cannot contain duplicates.",
+                )
+            selected_output_ids = output_ids
+        for output_id in selected_output_ids:
+            output = snapshot.get(output_id)
             if isinstance(output, runtime.video_output_type):
                 normalized.append((output_id, f"Output {output_id}", output.clip))
             elif isinstance(output, runtime.audio_node_type):
-                _LOGGER.debug("Ignoring registered audio output %s", output_id)
+                if output_ids is None:
+                    _LOGGER.debug("Ignoring registered audio output %s", output_id)
+                else:
+                    raise KaleidoscopeError(
+                        "invalid_clip",
+                        f"Registered output {output_id} is not a video output.",
+                    )
+            elif output_ids is not None:
+                raise KaleidoscopeError(
+                    "invalid_clip",
+                    f"Registered output {output_id} was not found.",
+                )
         if not normalized:
             raise KaleidoscopeError(
                 "no_video_outputs",
                 "No registered VapourSynth video outputs were found.",
             )
         return tuple(normalized)
+
+    if output_ids is not None:
+        raise KaleidoscopeError(
+            "invalid_clip",
+            "output_ids is available only when clips is omitted.",
+        )
 
     if isinstance(clips, runtime.video_node_type):
         return ((0, "Clip 0", clips),)
@@ -533,6 +571,7 @@ def _resolve_selection(
 def build_preview_config(
     clips: object | None,
     *,
+    output_ids: Sequence[int] | None = None,
     mode: ComparisonMode = "auto",
     primary: ClipId | None = None,
     secondary: ClipId | None = None,
@@ -612,7 +651,7 @@ def build_preview_config(
             "max_in_flight must be between 1 and 16.",
         )
 
-    normalized_inputs = _normalize_inputs(clips, runtime)
+    normalized_inputs = _normalize_inputs(clips, runtime, output_ids)
     normalized_clips: list[NormalizedClip] = []
     timeline_frames: int | None = None
     timeline_fps: Fraction | None = None

@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("paints without requesting external resources", async ({ page }) => {
+  const externalRequests: string[] = [];
+  await page.route("**/*", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (requestUrl.origin !== "http://127.0.0.1:4173") {
+      externalRequests.push(requestUrl.href);
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/tests/e2e/harness/");
+  await expect(page.getByRole("status")).toHaveText("Frame 0 ready.");
+  expect(externalRequests).toEqual([]);
+});
+
 test("paints an RGB24 frame", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {

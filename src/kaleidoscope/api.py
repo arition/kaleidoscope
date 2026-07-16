@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from concurrent.futures import Future
+from fractions import Fraction
+from typing import Any, Protocol
 
 from .encoding import Codec
 from .sources import (
@@ -11,12 +14,37 @@ from .sources import (
 )
 from .widget import PreviewWidget
 
-type ClipInput = object | Sequence[object] | Mapping[ClipId, object]
+
+class VideoNodeLike(Protocol):
+    @property
+    def width(self) -> int: ...
+
+    @property
+    def height(self) -> int: ...
+
+    @property
+    def num_frames(self) -> int: ...
+
+    @property
+    def fps(self) -> Fraction: ...
+
+    @property
+    def format(self) -> object: ...
+
+    def get_frame(self, frame: int) -> object: ...
+
+    def get_frame_async(self, frame: int) -> Future[Any]: ...
+
+
+type ClipInput = (
+    VideoNodeLike | Sequence[VideoNodeLike] | Mapping[ClipId, VideoNodeLike]
+)
 
 
 def preview(
     clips: ClipInput | None = None,
     *,
+    output_ids: Sequence[int] | None = None,
     mode: ComparisonMode = "auto",
     primary: ClipId | None = None,
     secondary: ClipId | None = None,
@@ -32,6 +60,7 @@ def preview(
 ) -> PreviewWidget:
     config = build_preview_config(
         clips,
+        output_ids=output_ids,
         mode=mode,
         primary=primary,
         secondary=secondary,

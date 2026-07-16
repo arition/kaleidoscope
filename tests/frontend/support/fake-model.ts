@@ -4,6 +4,7 @@ type MessageHandler = (message: unknown, buffers: DataView[]) => void;
 
 export class FakeModel implements AnyModel {
   comm_live = true;
+  current_frame = 0;
   readonly order: string[] = [];
   readonly sent: unknown[] = [];
   readonly widget_manager = {
@@ -13,7 +14,7 @@ export class FakeModel implements AnyModel {
       throw new Error("No child widgets are available in this test.");
     },
   };
-  private messageHandler: MessageHandler | undefined;
+  private readonly messageHandlers = new Set<MessageHandler>();
   private readonly changeHandlers = new Map<
     string,
     Set<(...args: any[]) => void>
@@ -28,6 +29,9 @@ export class FakeModel implements AnyModel {
     if (key === "comm_live") {
       return this.comm_live;
     }
+    if (key === "current_frame") {
+      return this.current_frame;
+    }
     return undefined;
   }
 
@@ -39,7 +43,7 @@ export class FakeModel implements AnyModel {
   on(eventName: string, callback: (...args: any[]) => void): void {
     this.order.push(`on:${eventName}`);
     if (eventName === "msg:custom") {
-      this.messageHandler = callback as MessageHandler;
+      this.messageHandlers.add(callback as MessageHandler);
     } else {
       const handlers = this.changeHandlers.get(eventName) ?? new Set();
       handlers.add(callback);
@@ -55,8 +59,12 @@ export class FakeModel implements AnyModel {
       return;
     }
     this.order.push(`off:${eventName}`);
-    if (eventName === "msg:custom" && this.messageHandler === callback) {
-      this.messageHandler = undefined;
+    if (eventName === "msg:custom") {
+      if (callback === undefined || callback === null) {
+        this.messageHandlers.clear();
+      } else {
+        this.messageHandlers.delete(callback as MessageHandler);
+      }
     } else {
       const handlers = this.changeHandlers.get(eventName);
       if (callback === undefined || callback === null) {
@@ -79,7 +87,21 @@ export class FakeModel implements AnyModel {
   }
 
   emit(message: unknown, buffers: DataView[] = []): void {
-    this.messageHandler?.(message, buffers);
+    for (const handler of this.messageHandlers) {
+      handler(message, buffers);
+    }
+  }
+
+  proxy(): AnyModel {
+    return {
+      get: this.get.bind(this),
+      set: this.set.bind(this),
+      save_changes: this.save_changes.bind(this),
+      send: this.send.bind(this),
+      on: this.on.bind(this),
+      off: this.off.bind(this),
+      widget_manager: this.widget_manager,
+    };
   }
 
   emitEvent(eventName: string): void {

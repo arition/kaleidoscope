@@ -147,6 +147,13 @@ class PreviewSession:
                 self._send(next_delivery.message, next_delivery.buffers)
             return acknowledged.frame
 
+    def resend_unacknowledged(self) -> None:
+        with self._delivery_lock:
+            with self._lock:
+                delivery = self._unacknowledged
+            if delivery is not None:
+                self._send(delivery.message, delivery.buffers)
+
     def _is_current(self, request: _FrameSetRequest) -> bool:
         with self._lock:
             return not self._closed and self._current_request is request

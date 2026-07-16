@@ -12,6 +12,12 @@ export interface ReadyMessage {
   capabilities: FrontendCapabilities;
 }
 
+export interface CloseMessage {
+  protocol: typeof PROTOCOL_VERSION;
+  type: "close";
+  session_id: string;
+}
+
 export type FrameRequestReason = "seek" | "playback" | "prefetch";
 
 export interface RequestFrameSetMessage {
@@ -374,6 +380,14 @@ export function createReadyMessage(
     type: "ready",
     session_id: sessionId,
     capabilities,
+  };
+}
+
+export function createCloseMessage(sessionId: string): CloseMessage {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: "close",
+    session_id: sessionId,
   };
 }
 

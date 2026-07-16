@@ -37,6 +37,12 @@ class ReadyMessage(TypedDict):
     capabilities: Capabilities
 
 
+class CloseMessage(TypedDict):
+    protocol: Literal[1]
+    type: Literal["close"]
+    session_id: str
+
+
 class RequestFrameSetMessage(TypedDict):
     protocol: Literal[1]
     type: Literal["request_frame_set"]
@@ -76,6 +82,7 @@ class SetViewMessage(TypedDict):
 
 type FrontendMessage = (
     ReadyMessage
+    | CloseMessage
     | RequestFrameSetMessage
     | AckFrameSetMessage
     | SetPlayingMessage
@@ -217,6 +224,11 @@ def parse_frontend_message(value: object) -> FrontendMessage:
         if not _is_capabilities(capabilities):
             raise ProtocolError("invalid_message", "Malformed ready message.")
         return cast(ReadyMessage, value)
+
+    if value.get("type") == "close":
+        if set(value) != {"protocol", "type", "session_id"}:
+            raise ProtocolError("invalid_message", "Malformed close message.")
+        return cast(CloseMessage, value)
 
     if value.get("type") == "request_frame_set":
         clip_ids = value.get("clip_ids")

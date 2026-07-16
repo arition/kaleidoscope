@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PROTOCOL_VERSION,
   ProtocolError,
+  createCloseMessage,
   createFrameSetAck,
   createReadyMessage,
   createSetPlayingMessage,
@@ -12,6 +13,14 @@ import {
 } from "../../frontend/protocol.js";
 
 describe("protocol v1", () => {
+  it("creates a session-close message", () => {
+    expect(createCloseMessage("session-1")).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: "close",
+      session_id: "session-1",
+    });
+  });
+
   it("creates a ready message with required capabilities", () => {
     expect(
       createReadyMessage("session-1", { image_bitmap: true, webp: false }),

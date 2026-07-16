@@ -1,8 +1,8 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T11 complete; T12 is next
+Status: G1 approved; T12 complete; T13 is next
 Source plan: `tasks/plan.md`  
-Source spec: `tasks/spec.md`, revision 0.5 approved
+Source spec: `tasks/spec.md`, revision 0.6 approved
 
 Do not start product implementation until Gate 0 is complete. Check a task only after its acceptance criteria and listed verification pass.
 
@@ -10,7 +10,8 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
 
 - [x] **G0 - Approve the product contract**
   - [x] Review every item in the spec approval checklist.
-  - [x] Confirm `kaleidoscope` package/distribution name and MIT license.
+  - [x] Confirm `vapoursynth-kaleidoscope` distribution name, `kaleidoscope`
+    import package, and MIT license.
   - [x] Confirm caller-owned `RGB24` plus warned fallback conversion.
   - [x] Confirm atomic multi-clip comparison modes and four-visible-clip cap.
   - [x] Confirm Linux-first host matrix and performance targets.
@@ -91,11 +92,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Implement stable narrow/desktop/fullscreen layouts and theme support.
   - [x] Run accessibility, screenshot, console, and canvas-pixel browser checks.
 
-- [ ] **T12 - Distributable package, examples, and docs** (depends on T11)
-  - [ ] Finalize wheel/sdist contents, `py.typed`, metadata, and license.
-  - [ ] Add installation, usage, architecture, and troubleshooting docs.
-  - [ ] Add a generated-media quickstart notebook.
-  - [ ] Pass clean wheel/sdist installs and offline runtime smoke tests.
+- [x] **T12 - Distributable package, examples, and docs** (depends on T11)
+  - [x] Finalize wheel/sdist contents, `py.typed`, metadata, and license.
+  - [x] Add installation, usage, architecture, and troubleshooting docs.
+  - [x] Add a generated-media quickstart notebook.
+  - [x] Pass clean wheel/sdist installs and offline runtime smoke tests.
 
 - [ ] **T13 - Compatibility matrix and final quality gate** (depends on T12)
   - [ ] Add CI for lint, types, tests, build, artifacts, and coverage.
@@ -106,7 +107,7 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
 
 ## Completion Rule
 
-- [ ] Every task has focused tests added before or with its behavior.
-- [ ] Targeted checks pass immediately after each slice.
-- [ ] Full Python/frontend/build checks pass before moving to the next dependent task.
-- [ ] Any contract change updates `tasks/spec.md` and `tasks/plan.md` before code follows it.
+- [x] Every completed task has focused tests added before or with its behavior.
+- [x] Targeted checks pass immediately after each completed slice.
+- [x] Full Python/frontend/build checks pass before moving to the next dependent task.
+- [x] Contract changes update `tasks/spec.md` and `tasks/plan.md` before code follows them.

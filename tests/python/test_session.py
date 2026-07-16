@@ -690,6 +690,41 @@ def test_generation_advance_discards_old_pending_but_preserves_delivery() -> Non
     assert [message["frame"] for message, _ in sent] == [0, 2]
 
 
+def test_resend_unacknowledged_replays_the_delivery_without_advancing_window() -> None:
+    node = FakeVideoNode()
+    sent: list[tuple[dict[str, object], list[bytes]]] = []
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: sent.append((message, buffers)),
+        encoder=lambda pixels, width, height, quality: EncodedImage(
+            mime="image/jpeg",
+            data=b"encoded:" + pixels,
+        ),
+        clock=lambda: 0.0,
+    )
+
+    session.request_frame_set(
+        request_id=0,
+        generation=0,
+        frame=4,
+        clip_ids=("Source",),
+    )
+    node.future.set_result(FakeFrame())
+
+    session.resend_unacknowledged()
+
+    assert [message["frame"] for message, _ in sent] == [4, 4]
+    assert (
+        session.ack_frame_set(
+            request_id=0,
+            generation=0,
+            outcome="stale",
+        )
+        == 4
+    )
+
+
 def test_mismatched_old_ack_does_not_clear_newer_delivery() -> None:
     node = FakeVideoNode()
     sent: list[tuple[dict[str, object], list[bytes]]] = []

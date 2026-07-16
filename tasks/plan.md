@@ -1,7 +1,7 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T11 complete; G1 approved; Task T12 is next
-Source: `tasks/spec.md`, revision 0.5 approved
+Status: T1-T12 complete; G1 approved; Task T13 is next
+Source: `tasks/spec.md`, revision 0.6 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
 
 ## 1. Preconditions and Assumptions
@@ -44,7 +44,7 @@ Task 1 establishes these stable commands so later tasks have predictable verific
 | Targeted/full frontend tests | `npm test -- --run [test paths or Vitest args]` |
 | Frontend type/build check | `npm run build` |
 | Browser end-to-end tests | `npm run test:e2e -- [Playwright args]` |
-| Python artifacts | `hatch build` |
+| Python artifacts | `hatch build [dedicated artifact directory]` |
 
 If a tool cannot support this exact spelling, Task 1 may amend the command contract in this document before subsequent tasks begin.
 
@@ -87,7 +87,7 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 - [ ] `kaleidoscope` imports from the source tree and exposes `PreviewWidget` plus a placeholder `preview()` entry point.
 - [ ] The frontend registers custom-message listeners, probes WebP through `createImageBitmap(Blob)`, and then sends `ready`.
-- [ ] Python sends initial metadata only after an accepted `ready`; pre-ready requests, unsupported decoders/codecs, duplicate handshakes, and incompatible protocol versions close the session with a terminal error.
+- [ ] Python sends initial metadata only after an accepted `ready`; pre-ready requests, unsupported decoders/codecs, and incompatible protocol versions close the session with a terminal error. A later valid `ready` resynchronizes an active replacement view with autoplay disabled and replays any retained delivery.
 - [ ] Protocol-v1 discriminated message types exist in Python and TypeScript with matching required fields.
 - [ ] The frontend renders an initialized placeholder without a CDN or runtime network request.
 - [ ] ESM and CSS assets are generated into `src/kaleidoscope/static/` and included in wheel/sdist builds.
@@ -312,7 +312,7 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 - [x] Recoverable failures pause playback, retain the last complete set, and allow retry or seek.
 - [x] Decode failure ACKs `decode_error` and releases all staged browser resources.
 - [x] Widget close clears caches, marks the session closed, ignores late futures, and is idempotent.
-- [x] anywidget `AbortSignal` removes DOM and model listeners and stops further sends after view removal.
+- [x] anywidget `AbortSignal` removes DOM and model listeners for the removed view. Shared-model views keep one active owner; active-view removal hands the current frame and request sequence to a survivor, while final-view removal sends `close` if the comm is live.
 - [x] Kernel disconnect shows a paused disconnected state with the last complete set retained.
 - [x] Multiple widgets have independent sessions, caches, generations, selections, and playback state.
 - [x] Exception content is inserted only as text and logs do not include pixel buffers or notebook source.
@@ -360,22 +360,23 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] Wheel and sdist include Python code, type marker, built ESM/CSS, license, and required metadata.
-- [ ] Frontend source and `node_modules` are not unintentionally shipped.
-- [ ] Clean installs from wheel and sdist import and render single-clip and two-output smoke previews.
-- [ ] No runtime CDN, analytics, server listener, or external request is required.
-- [ ] Installation docs clearly separate system VapourSynth prerequisites from Python package installation.
-- [ ] Usage docs cover direct clips, sequences/mappings, registered outputs, all comparison modes, sizing/quality, warnings, and cleanup.
-- [ ] Architecture docs explain ownership, protocol, atomic frame sets, backpressure, caches, security boundary, and benchmark decisions.
-- [ ] The quickstart notebook uses generated media and can run without external source files/plugins.
-- [ ] Saved output does not persist streamed frame buffers as durable playable state.
+- [x] Wheel and sdist include Python code, type marker, built ESM/CSS, license, and required metadata.
+- [x] Frontend source and `node_modules` are not unintentionally shipped.
+- [x] Clean installs from wheel and sdist import and render single-clip and two-output smoke previews.
+- [x] No runtime CDN, analytics, server listener, or external request is required.
+- [x] Installation docs clearly separate system VapourSynth prerequisites from Python package installation.
+- [x] Usage docs cover direct clips, sequences/mappings, registered outputs, all comparison modes, sizing/quality, warnings, and cleanup.
+- [x] Architecture docs explain ownership, protocol, atomic frame sets, backpressure, caches, security boundary, and benchmark decisions.
+- [x] The quickstart notebook uses generated media and can run without external source files/plugins.
+- [x] Saved output does not persist streamed frame buffers as durable playable state.
 
 **Verification:**
 
-- [ ] `npm run build && hatch build`
-- [ ] Artifact-content inspection passes for wheel and sdist.
-- [ ] Clean-environment wheel and sdist smoke scripts pass without network access.
-- [ ] Notebook smoke execution completes where a compatible kernel is available.
+- [x] `npm run build && hatch build "$release_dir"`
+- [x] Exact artifact-member, regular-file, source-byte, metadata, and wheel `RECORD` inspection passes for wheel and sdist.
+- [x] A separate exact SHA-256-manifested wheelhouse preparation phase completes for the dedicated artifact directory.
+- [x] Fresh wheel and sdist installs, isolated sdist build hooks, real IPC-kernel notebook execution, and installed-byte Chromium rendering pass under an inherited Unix-socket-only seccomp boundary.
+- [x] The final artifact build and smoke proof are repeated from an export of the staged Git index.
 
 ## T13: Compatibility Matrix and Final Quality Gate
 

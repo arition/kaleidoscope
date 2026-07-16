@@ -18,6 +18,7 @@ class FakeSession:
         self.requests: list[dict[str, object]] = []
         self.acks: list[dict[str, object]] = []
         self.generations: list[int] = []
+        self.resend_calls = 0
 
     def advance_generation(self, generation: int) -> None:
         self.generations.append(generation)
@@ -28,6 +29,9 @@ class FakeSession:
     def ack_frame_set(self, **ack: object) -> int:
         self.acks.append(ack)
         return 12
+
+    def resend_unacknowledged(self) -> None:
+        self.resend_calls += 1
 
     def close(self) -> None:
         self.close_calls += 1
@@ -532,6 +536,102 @@ def test_explicit_close_clears_playing_and_marks_the_widget_closed() -> None:
     assert widget.status == "closed"
     assert widget.playing is False
     assert session.closed is True
+
+
+def test_frontend_close_closes_session_before_ready() -> None:
+    session = FakeSession()
+    widget = PreviewWidget(session_id="session-1")
+    widget._session = session
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "close",
+            "session_id": "session-1",
+        },
+        [],
+    )
+
+    assert widget.status == "closed"
+    assert widget.playing is False
+    assert session.close_calls == 1
+
+
+def test_repeated_ready_resends_current_view_metadata(monkeypatch: Any) -> None:
+    sent: list[dict[str, object]] = []
+    clip = type(
+        "Clip",
+        (),
+        {
+            "id": "Source",
+            "label": "Source",
+            "source_format": "RGB24",
+            "source_width": 1,
+            "source_height": 1,
+            "output_width": 1,
+            "output_height": 1,
+            "warnings": (),
+        },
+    )()
+    reference = type(
+        "Clip",
+        (),
+        {
+            "id": "Reference",
+            "label": "Reference",
+            "source_format": "RGB24",
+            "source_width": 1,
+            "source_height": 1,
+            "output_width": 1,
+            "output_height": 1,
+            "warnings": (),
+        },
+    )()
+    config = type(
+        "Config",
+        (),
+        {
+            "codec": "jpeg",
+            "mode": "single",
+            "active_clip_ids": ("Source",),
+            "overlay_opacity": 0.5,
+            "num_frames": 10,
+            "fps": Fraction(24, 1),
+            "max_visible_clips": 4,
+            "clips": (clip, reference),
+            "autoplay": True,
+        },
+    )()
+    monkeypatch.setattr(
+        "kaleidoscope.widget.PreviewSession",
+        lambda **kwargs: FakeSession(),
+    )
+    monkeypatch.setattr(
+        PreviewWidget,
+        "send",
+        lambda self, content, buffers=None: sent.append(content),
+    )
+    widget = PreviewWidget(config=config, session_id="session-1")
+    ready = {
+        "protocol": 1,
+        "type": "ready",
+        "session_id": "session-1",
+        "capabilities": {"image_bitmap": True, "webp": True},
+    }
+
+    widget._handle_custom_message(widget, ready, [])
+    widget._view_mode = "wipe"
+    widget._view_active_clip_ids = ("Source", "Reference")
+    widget._view_overlay_opacity = 0.25
+    widget._handle_custom_message(widget, ready, [])
+
+    assert [message["type"] for message in sent] == ["metadata", "metadata"]
+    assert sent[-1]["mode"] == "wipe"
+    assert sent[-1]["active_clip_ids"] == ["Source", "Reference"]
+    assert sent[-1]["overlay_opacity"] == 0.25
+    assert widget.status == "ready"
+    assert widget._session.resend_calls == 1
 
 
 def test_explicit_close_is_idempotent() -> None:

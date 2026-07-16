@@ -197,6 +197,78 @@ describe("widget render", () => {
     );
   });
 
+  it("closes and blocks interaction after malformed backend traffic", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+    const controller = new AbortController();
+
+    render({ model, el: element, signal: controller.signal });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 1,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+    model.emit({
+      protocol: 2,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+    });
+
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "close",
+      ),
+    ).toEqual([
+      {
+        protocol: 1,
+        type: "close",
+        session_id: "session-1",
+      },
+    ]);
+    const sentAfterError = model.sent.length;
+
+    element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
+    const seek = element.querySelector<HTMLInputElement>(
+      "input[aria-label='Seek frame']",
+    );
+    if (seek === null) {
+      throw new Error("Missing seek control.");
+    }
+    seek.value = "1";
+    seek.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(model.sent).toHaveLength(sentAfterError);
+    expect(element.querySelector("[role='status']")?.textContent).toContain(
+      "Protocol error",
+    );
+  });
+
   it("pauses and retains the last frame when the kernel disconnects", async () => {
     const drawImage = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
@@ -305,12 +377,170 @@ describe("widget render", () => {
     render({ model, el: element, signal: controller.signal });
     controller.abort();
 
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "close",
+      ),
+    ).toEqual([
+      {
+        protocol: 1,
+        type: "close",
+        session_id: "session-1",
+      },
+    ]);
     expect(model.order).toContain("off:msg:custom");
     expect(model.order).toContain("off:change:comm_live");
     expect(model.order).toContain("off:comm_live_update");
     const sentBeforeDisconnect = model.sent.length;
     model.setCommLive(false);
     expect(model.sent).toHaveLength(sentBeforeDisconnect);
+  });
+
+  it("hands a shared model to the next view and closes after the final view", () => {
+    const model = new FakeModel();
+    const firstProxy = model.proxy();
+    const secondProxy = model.proxy();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    render({
+      model: firstProxy,
+      el: document.createElement("div"),
+      signal: firstController.signal,
+    });
+    render({
+      model: secondProxy,
+      el: document.createElement("div"),
+      signal: secondController.signal,
+    });
+
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "ready",
+      ),
+    ).toHaveLength(1);
+
+    firstController.abort();
+
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "close",
+      ),
+    ).toHaveLength(0);
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "ready",
+      ),
+    ).toHaveLength(2);
+
+    secondController.abort();
+
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "close",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("acks a handoff race and resumes from the model's current frame", () => {
+    const model = new FakeModel();
+    model.current_frame = 6;
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    render({
+      model: model.proxy(),
+      el: document.createElement("div"),
+      signal: firstController.signal,
+    });
+    render({
+      model: model.proxy(),
+      el: document.createElement("div"),
+      signal: secondController.signal,
+    });
+    firstController.abort();
+
+    model.emit({
+      protocol: 1,
+      type: "frame_set",
+      session_id: "session-1",
+      request_id: 8,
+      generation: 3,
+      frame: 6,
+      frames: [
+        {
+          clip_id: "Source",
+          buffer_index: 0,
+          mime: "image/jpeg",
+          byte_length: 1,
+          render_ms: 1,
+          encode_ms: 1,
+        },
+      ],
+    });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 4,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 64,
+          source_height: 48,
+          output_width: 64,
+          output_height: 48,
+          warnings: [],
+        },
+      ],
+    });
+
+    expect(model.sent).toContainEqual({
+      protocol: 1,
+      type: "ack_frame_set",
+      session_id: "session-1",
+      request_id: 8,
+      generation: 3,
+      outcome: "stale",
+    });
+    expect(model.sent).toContainEqual(
+      expect.objectContaining({
+        type: "request_frame_set",
+        frame: 6,
+      }),
+    );
+
+    secondController.abort();
   });
 
   it("stops paused navigation when the view is aborted", () => {

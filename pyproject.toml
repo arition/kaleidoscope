@@ -1,55 +1,62 @@
 [build-system]
 requires = [
   "hatchling>=1.27",
-  "hatch-jupyter-builder>=0.9,<0.10",
 ]
 build-backend = "hatchling.build"
 
 [project]
-name = "kaleidoscope"
+name = "vapoursynth-kaleidoscope"
 version = "0.1.0"
 description = "Real-time VapourSynth preview and comparison for Jupyter"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["jupyter", "vapoursynth", "video", "preview", "comparison"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: Jupyter",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
 dependencies = [
   "anywidget>=0.11,<0.12",
   "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
+  "traitlets>=5.15,<6",
   "VapourSynth>=77,<78",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kaleidoscope"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"examples/quickstart.ipynb" = "kaleidoscope/examples/quickstart.ipynb"
+
 [tool.hatch.build.targets.sdist]
 include = [
-  "/benchmarks",
-  "/frontend",
+  "/LICENSE",
+  "/README.md",
+  "/docs",
+  "/examples/quickstart.ipynb",
   "/src/kaleidoscope",
   "/tasks/benchmark-report.md",
-  "/tests",
-  "/package.json",
-  "/package-lock.json",
-  "/playwright.config.ts",
-  "/tsconfig.json",
-  "/vitest.config.ts",
+  "/pyproject.toml",
 ]
+exclude = ["/.gitignore"]
 
-[tool.hatch.build.hooks.jupyter-builder]
-dependencies = ["hatch-jupyter-builder>=0.9,<0.10"]
-build-function = "hatch_jupyter_builder.npm_builder"
-ensured-targets = [
-  "src/kaleidoscope/static/index.js",
-  "src/kaleidoscope/static/index.css",
-]
-
-[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
-build_cmd = "build"
+[tool.hatch.build.targets.sdist.hooks.custom]
 
 [tool.hatch.envs.test]
 skip-install = true
 dependencies = [
   "anywidget>=0.11,<0.12",
+  "hatchling>=1.27",
+  "ipykernel>=7,<8",
+  "nbclient>=0.10,<0.11",
+  "nbformat>=5.10,<6",
   "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
   "pytest>=8.3,<9",
@@ -61,8 +68,11 @@ dependencies = [
 PYTHONPATH = "src"
 
 [tool.hatch.envs.test.scripts]
+artifact-smoke = "python tests/packaging/smoke_artifacts.py"
 e2e-fixture = "python tests/e2e/generate_fixture.py"
-pytest = "python -m pytest {args:tests/python}"
+notebook-smoke = "python tests/packaging/smoke_notebook.py"
+prepare-wheelhouse = "python tests/packaging/prepare_wheelhouse.py"
+pytest = "python -m pytest {args:tests/python tests/packaging}"
 
 [tool.hatch.envs.lint]
 detached = true
@@ -70,8 +80,8 @@ dependencies = ["ruff>=0.11,<0.12"]
 
 [tool.hatch.envs.lint.scripts]
 check = [
-  "ruff check src tests/python",
-  "ruff format --check src tests/python",
+  "ruff check src tests/conftest.py tests/python tests/packaging",
+  "ruff format --check src tests/conftest.py tests/python tests/packaging",
 ]
 
 [tool.hatch.envs.types]
@@ -83,11 +93,11 @@ dependencies = [
 ]
 
 [tool.hatch.envs.types.scripts]
-check = "mypy src/kaleidoscope"
+check = "mypy src/kaleidoscope tests/typing"
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
-testpaths = ["tests/python"]
+testpaths = ["tests/python", "tests/packaging"]
 
 [tool.ruff]
 target-version = "py312"
