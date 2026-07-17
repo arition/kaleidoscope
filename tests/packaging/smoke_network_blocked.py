@@ -101,7 +101,9 @@ for family in (
     except PermissionError:
         pass
     else:
-        raise AssertionError(f"Artifact smoke network guard did not block socketpair family {family}")
+        raise AssertionError(
+            f"Artifact smoke network guard did not block socketpair family {family}"
+        )
 
 local_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 local_socket.close()

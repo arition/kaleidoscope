@@ -22,9 +22,7 @@ describe("protocol v1", () => {
   });
 
   it("creates a ready message with required capabilities", () => {
-    expect(
-      createReadyMessage("session-1", { image_bitmap: true, webp: false }),
-    ).toEqual({
+    expect(createReadyMessage("session-1", { image_bitmap: true, webp: false })).toEqual({
       protocol: PROTOCOL_VERSION,
       type: "ready",
       session_id: "session-1",
@@ -41,12 +39,8 @@ describe("protocol v1", () => {
       generation: 2,
       outcome: "painted",
     });
-    expect(createFrameSetAck("session-1", 8, 2, "stale").outcome).toBe(
-      "stale",
-    );
-    expect(createFrameSetAck("session-1", 9, 2, "decode_error").outcome).toBe(
-      "decode_error",
-    );
+    expect(createFrameSetAck("session-1", 8, 2, "stale").outcome).toBe("stale");
+    expect(createFrameSetAck("session-1", 9, 2, "decode_error").outcome).toBe("decode_error");
   });
 
   it("creates an explicit playing-state message", () => {
@@ -59,15 +53,7 @@ describe("protocol v1", () => {
   });
 
   it("creates a durable comparison view message", () => {
-    expect(
-      createSetViewMessage(
-        "session-1",
-        3,
-        "overlay",
-        ["Source", "Filtered"],
-        0.25,
-      ),
-    ).toEqual({
+    expect(createSetViewMessage("session-1", 3, "overlay", ["Source", "Filtered"], 0.25)).toEqual({
       protocol: 1,
       type: "set_view",
       session_id: "session-1",
@@ -162,7 +148,9 @@ describe("protocol v1", () => {
         session_id: "session-1",
         status: "initialized",
       }),
-    ).toThrowError(new ProtocolError("protocol_mismatch", "Unsupported protocol version 2; expected 1."));
+    ).toThrowError(
+      new ProtocolError("protocol_mismatch", "Unsupported protocol version 2; expected 1."),
+    );
   });
 
   it("rejects preview metadata without an autoplay decision", () => {
@@ -570,10 +558,7 @@ describe("protocol v1", () => {
     }
 
     expect(() =>
-      validateFrameSetBuffers(
-        message,
-        [new DataView(new Uint8Array([1, 2, 3]).buffer)],
-      ),
+      validateFrameSetBuffers(message, [new DataView(new Uint8Array([1, 2, 3]).buffer)]),
     ).toThrowError(ProtocolError);
   });
 });

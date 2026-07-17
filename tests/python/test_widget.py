@@ -168,9 +168,7 @@ def test_ready_widget_rejects_frame_requests_without_a_session(
     )
 
     assert widget.status == "error"
-    assert sent[-1]["message"] == (
-        "Frame requests require an initialized preview session."
-    )
+    assert sent[-1]["message"] == ("Frame requests require an initialized preview session.")
 
 
 def test_widget_rejects_comparison_views_without_clip_metadata(
@@ -196,9 +194,7 @@ def test_widget_rejects_comparison_views_without_clip_metadata(
     )
 
     assert widget.status == "error"
-    assert sent[-1]["message"] == (
-        "Comparison views require initialized clip metadata."
-    )
+    assert sent[-1]["message"] == ("Comparison views require initialized clip metadata.")
 
 
 def test_widget_metadata_includes_autoplay(monkeypatch: Any) -> None:
@@ -410,9 +406,7 @@ def test_widget_rejects_request_older_than_the_accepted_view(
     assert session.generations == [2]
     assert session.requests == []
     assert widget.status == "error"
-    assert sent[-1]["message"] == (
-        "Frame-set request generation is older than the active view."
-    )
+    assert sent[-1]["message"] == ("Frame-set request generation is older than the active view.")
 
 
 def test_widget_rejects_view_older_than_the_latest_request(
@@ -476,9 +470,7 @@ def test_widget_rejects_view_older_than_the_latest_request(
     ]
     assert widget.active_clip_ids == []
     assert widget.status == "error"
-    assert sent[-1]["message"] == (
-        "Comparison view generation is older than the latest request."
-    )
+    assert sent[-1]["message"] == ("Comparison view generation is older than the latest request.")
 
 
 def test_widget_rejects_active_view_after_same_generation_request(
@@ -1195,6 +1187,4 @@ def test_widget_rejects_incompatible_protocol_without_metadata(
     )
 
     assert session.requests == []
-    assert sent[-1]["message"] == (
-        "Preview session is no longer accepting frontend messages."
-    )
+    assert sent[-1]["message"] == ("Preview session is no longer accepting frontend messages.")

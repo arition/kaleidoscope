@@ -114,12 +114,8 @@ describe("metadata presentation", () => {
       ],
     });
 
-    expect(element.querySelector("[data-clip-id='A']")?.getAttribute("data-active")).toBe(
-      "false",
-    );
-    expect(element.querySelector("[data-clip-id='B']")?.getAttribute("data-active")).toBe(
-      "true",
-    );
+    expect(element.querySelector("[data-clip-id='A']")?.getAttribute("data-active")).toBe("false");
+    expect(element.querySelector("[data-clip-id='B']")?.getAttribute("data-active")).toBe("true");
     expect(element.textContent).not.toContain("Inactive conversion warning.");
   });
 
@@ -198,7 +194,7 @@ describe("metadata presentation", () => {
     const controller = new AbortController();
 
     render({ model, el: element, signal: controller.signal });
-  await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
     model.emit({
       protocol: 1,
       type: "metadata",
@@ -262,9 +258,7 @@ describe("metadata presentation", () => {
 
     await vi.waitFor(() => expect(drawImage).toHaveBeenCalledOnce());
 
-    const canvas = element.querySelector<HTMLCanvasElement>(
-      "[data-clip-id='Source'] canvas",
-    );
+    const canvas = element.querySelector<HTMLCanvasElement>("[data-clip-id='Source'] canvas");
     expect(canvas?.width).toBe(2);
     expect(canvas?.height).toBe(1);
     expect(createImageBitmap).toHaveBeenCalledWith(
@@ -281,16 +275,14 @@ describe("metadata presentation", () => {
     const probeClose = vi.fn();
     const firstBitmap = { close: firstClose } as unknown as ImageBitmap;
     const secondBitmap = { close: secondClose } as unknown as ImageBitmap;
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
-      () => {
-        return {
-          clearRect: vi.fn(),
-          drawImage: vi.fn((bitmap: ImageBitmap) => {
-            drawOrder.push(bitmap === firstBitmap ? "Source" : "Filtered");
-          }),
-        } as unknown as CanvasRenderingContext2D;
-      },
-    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+      return {
+        clearRect: vi.fn(),
+        drawImage: vi.fn((bitmap: ImageBitmap) => {
+          drawOrder.push(bitmap === firstBitmap ? "Source" : "Filtered");
+        }),
+      } as unknown as CanvasRenderingContext2D;
+    });
     let resolveFirstDecode: (bitmap: ImageBitmap) => void = () => {};
     let resolveSecondDecode: (bitmap: ImageBitmap) => void = () => {};
     const firstDecode = new Promise<ImageBitmap>((resolve) => {
@@ -311,7 +303,7 @@ describe("metadata presentation", () => {
     const controller = new AbortController();
 
     render({ model, el: element, signal: controller.signal });
-  await vi.waitFor(() => expect(model.sent).toHaveLength(1));
+    await vi.waitFor(() => expect(model.sent).toHaveLength(1));
     model.emit({
       protocol: 1,
       type: "metadata",
@@ -378,10 +370,7 @@ describe("metadata presentation", () => {
           },
         ],
       },
-      [
-        new DataView(sourcePayload.buffer),
-        new DataView(filteredPayload.buffer),
-      ],
+      [new DataView(sourcePayload.buffer), new DataView(filteredPayload.buffer)],
     );
 
     resolveFirstDecode(firstBitmap);
@@ -389,9 +378,7 @@ describe("metadata presentation", () => {
     expect(drawOrder).toEqual([]);
 
     resolveSecondDecode(secondBitmap);
-    await vi.waitFor(() =>
-      expect(drawOrder).toEqual(["Source", "Filtered"]),
-    );
+    await vi.waitFor(() => expect(drawOrder).toEqual(["Source", "Filtered"]));
     expect(probeClose).toHaveBeenCalledOnce();
     expect(firstClose).toHaveBeenCalledOnce();
     expect(secondClose).toHaveBeenCalledOnce();
@@ -412,9 +399,7 @@ describe("metadata presentation", () => {
     );
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
     const model = new FakeModel();
@@ -532,29 +517,17 @@ describe("metadata presentation", () => {
       ],
     });
 
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
-    const time = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current time']",
-    );
-    const next = element.querySelector<HTMLButtonElement>(
-      "button[aria-label='Next frame']",
-    );
-    const last = element.querySelector<HTMLButtonElement>(
-      "button[aria-label='Last frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
+    const time = element.querySelector<HTMLInputElement>("input[aria-label='Current time']");
+    const next = element.querySelector<HTMLButtonElement>("button[aria-label='Next frame']");
+    const last = element.querySelector<HTMLButtonElement>("button[aria-label='Last frame']");
 
     expect(seek?.max).toBe("239");
     expect(frame?.value).toBe("0");
     expect(time?.value).toBe("00:00:00.000");
     expect(time?.maxLength).toBe(32);
-    expect(
-      element.querySelector("[role='group'][aria-label='Paused navigation']"),
-    ).not.toBeNull();
+    expect(element.querySelector("[role='group'][aria-label='Paused navigation']")).not.toBeNull();
     expect(element.textContent).toContain("00:00:10.010");
     expect(next).not.toBeNull();
     expect(last).not.toBeNull();
@@ -586,11 +559,13 @@ describe("metadata presentation", () => {
         "type" in message &&
         message.type === "request_frame_set",
     );
-    expect(requests.map(({ request_id, generation, frame: target }) => ({
-      request_id,
-      generation,
-      frame: target,
-    }))).toEqual([
+    expect(
+      requests.map(({ request_id, generation, frame: target }) => ({
+        request_id,
+        generation,
+        frame: target,
+      })),
+    ).toEqual([
       { request_id: 0, generation: 0, frame: 0 },
       { request_id: 1, generation: 1, frame: 1 },
       { request_id: 2, generation: 2, frame: 120 },
@@ -635,14 +610,10 @@ describe("metadata presentation", () => {
       ],
     });
 
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
     expect(frame).not.toBeNull();
 
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     expect(frame?.value).toBe("1");
 
     element.dispatchEvent(
@@ -654,27 +625,17 @@ describe("metadata presentation", () => {
     );
     expect(frame?.value).toBe("24");
 
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "End", bubbles: true }),
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
     expect(frame?.value).toBe("239");
 
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Home", bubbles: true }),
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     expect(frame?.value).toBe("0");
 
-    frame?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
-    );
+    frame?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     expect(frame?.value).toBe("0");
 
-    const next = element.querySelector<HTMLButtonElement>(
-      "button[aria-label='Next frame']",
-    );
-    next?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: " ", bubbles: true }),
-    );
+    const next = element.querySelector<HTMLButtonElement>("button[aria-label='Next frame']");
+    next?.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     expect(
       model.sent.filter(
         (message) =>
@@ -758,23 +719,15 @@ describe("metadata presentation", () => {
     fullscreen?.click();
     expect(requestFullscreen).toHaveBeenCalledOnce();
 
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
     expect(requestFullscreen).toHaveBeenCalledTimes(2);
 
     fullscreen?.focus();
-    fullscreen?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
-    );
+    fullscreen?.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
     expect(requestFullscreen).toHaveBeenCalledTimes(3);
 
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
-    frame?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "f", bubbles: true }),
-    );
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
+    frame?.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
     expect(requestFullscreen).toHaveBeenCalledTimes(3);
 
     fullscreenElement = element;
@@ -827,14 +780,10 @@ describe("metadata presentation", () => {
       ],
     });
 
-    const play = element.querySelector<HTMLButtonElement>(
-      "button[aria-label='Play']",
-    );
+    const play = element.querySelector<HTMLButtonElement>("button[aria-label='Play']");
     expect(play).not.toBeNull();
     play?.click();
-    expect(
-      element.querySelector("button[aria-label='Pause']"),
-    ).not.toBeNull();
+    expect(element.querySelector("button[aria-label='Pause']")).not.toBeNull();
 
     scheduled?.(1101);
 
@@ -856,9 +805,7 @@ describe("metadata presentation", () => {
       playing: true,
     });
 
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Pause']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Pause']")?.click();
     expect(cancel).toHaveBeenCalledWith(23);
     expect(model.sent.at(-1)).toEqual({
       protocol: 1,
@@ -909,9 +856,7 @@ describe("metadata presentation", () => {
     await vi.waitFor(() =>
       expect(element.querySelector("[data-clip-id='Source'] canvas")).not.toBeNull(),
     );
-    const frameInput = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
+    const frameInput = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
     if (frameInput === null) {
       throw new Error("Missing frame input.");
     }
@@ -941,9 +886,7 @@ describe("metadata presentation", () => {
 
     await vi.waitFor(() =>
       expect(
-        element
-          .querySelector("[data-clip-id='Source'] canvas")
-          ?.getAttribute("aria-label"),
+        element.querySelector("[data-clip-id='Source'] canvas")?.getAttribute("aria-label"),
       ).toBe("Source, frame 24, time 00:00:01.001"),
     );
     expect(element.getAttribute("role")).toBe("region");

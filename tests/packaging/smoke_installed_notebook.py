@@ -157,9 +157,7 @@ async def execute_notebook(
                 "mode": metadata["mode"],
                 "clip_ids": metadata["active_clip_ids"],
                 "frame_set": frame_set,
-                "buffers": [
-                    b64encode(buffer).decode("ascii") for buffer in frame_buffers
-                ],
+                "buffers": [b64encode(buffer).decode("ascii") for buffer in frame_buffers],
             }
 
         client.set_widgets_metadata()
@@ -176,9 +174,7 @@ def main() -> None:
     notebook_path = package_dir / "examples" / "quickstart.ipynb"
     notebook = nbformat.read(notebook_path, as_version=4)
 
-    with tempfile.TemporaryDirectory(
-        prefix="kaleidoscope-installed-notebook-"
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="kaleidoscope-installed-notebook-") as temporary:
         root = Path(temporary)
         kernel_spec_manager = KernelSpecManager(kernel_dirs=[])
         kernel_spec_manager.get_kernel_spec = lambda name: KernelSpec(

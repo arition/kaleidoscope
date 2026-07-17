@@ -16,9 +16,7 @@ describe("widget render", () => {
     render({ model, el: element, signal: controller.signal });
 
     await vi.waitFor(() => expect(model.sent).toHaveLength(1));
-    expect(model.order.indexOf("on:msg:custom")).toBeLessThan(
-      model.order.indexOf("send:ready"),
-    );
+    expect(model.order.indexOf("on:msg:custom")).toBeLessThan(model.order.indexOf("send:ready"));
     expect(model.sent).toEqual([
       {
         protocol: 1,
@@ -326,9 +324,7 @@ describe("widget render", () => {
     const sentAfterError = model.sent.length;
 
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }
@@ -398,9 +394,7 @@ describe("widget render", () => {
     const sentAfterError = model.sent.length;
 
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }
@@ -408,9 +402,7 @@ describe("widget render", () => {
     seek.dispatchEvent(new Event("change", { bubbles: true }));
 
     expect(model.sent).toHaveLength(sentAfterError);
-    expect(element.querySelector("[role='status']")?.textContent).toContain(
-      "Protocol error",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toContain("Protocol error");
   });
 
   it("pauses and retains the last frame when the kernel disconnects", async () => {
@@ -421,9 +413,7 @@ describe("widget render", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
     const model = new FakeModel();
     const element = document.createElement("div");
@@ -497,9 +487,7 @@ describe("widget render", () => {
 
     const sentAfterDisconnect = model.sent.length;
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }
@@ -721,9 +709,7 @@ describe("widget render", () => {
     });
     controller.abort();
 
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
 
     const requests = model.sent.filter(
       (message) =>
@@ -835,9 +821,7 @@ describe("widget render", () => {
   it("keeps two rendered widgets independent", async () => {
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       clearRect: vi.fn(),
@@ -887,9 +871,7 @@ describe("widget render", () => {
     firstModel.emit(createMetadata("session-1"));
     secondModel.emit(createMetadata("session-2"));
 
-    firstElement
-      .querySelector<HTMLButtonElement>("button[aria-label='Play']")
-      ?.click();
+    firstElement.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
 
     expect(firstModel.sent).toContainEqual({
       protocol: 1,
@@ -897,9 +879,7 @@ describe("widget render", () => {
       session_id: "session-1",
       playing: true,
     });
-    expect(secondModel.sent).not.toContainEqual(
-      expect.objectContaining({ type: "set_playing" }),
-    );
+    expect(secondModel.sent).not.toContainEqual(expect.objectContaining({ type: "set_playing" }));
     expect(secondElement.querySelector("button[aria-label='Play']")).not.toBeNull();
 
     firstModel.comm_live = false;

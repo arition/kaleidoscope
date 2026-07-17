@@ -148,12 +148,8 @@ def verify_wheelhouse(wheelhouse: Path, release_wheel: Path) -> None:
         if file_hash(path) != expected_hash:
             raise RuntimeError(f"Wheelhouse hash mismatch for {name}")
     copied_wheel = wheelhouse / WHEEL_NAME
-    if not copied_wheel.is_file() or file_hash(copied_wheel) != file_hash(
-        release_wheel
-    ):
-        raise RuntimeError(
-            "Wheelhouse package wheel does not match the release artifact"
-        )
+    if not copied_wheel.is_file() or file_hash(copied_wheel) != file_hash(release_wheel):
+        raise RuntimeError("Wheelhouse package wheel does not match the release artifact")
 
 
 def install_network_guard(environment: Path) -> tuple[Path, Path, Path]:

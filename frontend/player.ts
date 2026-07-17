@@ -1,15 +1,5 @@
-import type {
-  ClipId,
-  ClipMetadata,
-  ComparisonMode,
-  FrameSetMessage,
-  PreviewMetadataMessage,
-} from "./protocol.js";
-import { createComparisonState } from "./comparison.js";
-import type {
-  ComparisonState,
-  ComparisonTransition,
-} from "./comparison.js";
+import type { ClipId, ClipMetadata, FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
+import type { ComparisonState, ComparisonTransition } from "./comparison.js";
 import { createComparisonView } from "./comparison-view.js";
 import {
   formatFrameTime,
@@ -43,19 +33,9 @@ function idsMatch(left: ClipId, right: ClipId): boolean {
   return left === right;
 }
 
-function describeFrame(
-  label: string,
-  frame: number,
-  metadata: PreviewMetadataMessage,
-): string {
+function describeFrame(label: string, frame: number, metadata: PreviewMetadataMessage): string {
   return `${label}, frame ${frame}, time ${formatFrameTime(frame, metadata.fps_num, metadata.fps_den)}`;
 }
-
-const ALIGNED_MODES: ReadonlySet<ComparisonMode> = new Set([
-  "wipe",
-  "overlay",
-  "difference",
-]);
 
 function createClipWarnings(clip: ClipMetadata): HTMLUListElement {
   const warnings = document.createElement("ul");
@@ -213,9 +193,7 @@ export function renderMetadata(
   play.type = "button";
   play.className = "kaleidoscope-control-button";
   play.disabled = navigation === undefined;
-  let playing = false;
   const updatePlaying = (active: boolean): void => {
-    playing = active;
     play.setAttribute("aria-label", active ? "Pause" : "Play");
     play.title = active ? "Pause" : "Play";
     play.textContent = active ? "||" : ">";
@@ -279,28 +257,15 @@ export function renderMetadata(
   };
 
   const first = createNavigationButton("First frame", "|<", () => 0);
-  const previous = createNavigationButton(
-    "Previous frame",
-    "<",
-    () => currentFrame - 1,
-  );
-  const next = createNavigationButton(
-    "Next frame",
-    ">",
-    () => currentFrame + 1,
-  );
-  const last = createNavigationButton(
-    "Last frame",
-    ">|",
-    () => message.num_frames - 1,
-  );
+  const previous = createNavigationButton("Previous frame", "<", () => currentFrame - 1);
+  const next = createNavigationButton("Next frame", ">", () => currentFrame + 1);
+  const last = createNavigationButton("Last frame", ">|", () => message.num_frames - 1);
 
   const fullscreen = document.createElement("button");
   fullscreen.type = "button";
   fullscreen.className = "kaleidoscope-control-button";
   const fullscreenSupported =
-    typeof root.requestFullscreen === "function" &&
-    typeof document.exitFullscreen === "function";
+    typeof root.requestFullscreen === "function" && typeof document.exitFullscreen === "function";
   fullscreen.disabled = !fullscreenSupported;
   let reportFullscreenError = (): void => {};
   const updateFullscreen = (): void => {
@@ -539,9 +504,7 @@ async function decodeFrames(
     message.frames.map(async (manifest) => {
       const buffer = buffers[manifest.buffer_index];
       const payload = new Uint8Array(buffer.byteLength);
-      payload.set(
-        new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
-      );
+      payload.set(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
       const blob = new Blob([payload], {
         type: manifest.mime,
       });
@@ -594,14 +557,11 @@ export async function paintFrameSet(
       if (
         clip === undefined ||
         (currentCanvas !== undefined &&
-          (parent === null ||
-            parent === undefined ||
-            currentCanvas.getContext("2d") === null))
+          (parent === null || parent === undefined || currentCanvas.getContext("2d") === null))
       ) {
         throw new Error("The active preview canvas is unavailable.");
       }
-      const stagedCanvas =
-        currentCanvas?.cloneNode(false) as HTMLCanvasElement | undefined;
+      const stagedCanvas = currentCanvas?.cloneNode(false) as HTMLCanvasElement | undefined;
       const candidateCanvas = stagedCanvas ?? createClipCanvas(clip);
       const context = candidateCanvas.getContext("2d");
       if (context === null) {
@@ -616,19 +576,12 @@ export async function paintFrameSet(
       };
     });
     for (const { decoded: frame, stagedCanvas, context } of targets) {
-      context.drawImage(
-        frame.bitmap,
-        0,
-        0,
-        stagedCanvas.width,
-        stagedCanvas.height,
-      );
+      context.drawImage(frame.bitmap, 0, 0, stagedCanvas.width, stagedCanvas.height);
       stagedCanvas.setAttribute(
         "aria-label",
         describeFrame(
-          view.metadata.clips.find((clip) =>
-            idsMatch(clip.id, frame.manifest.clip_id),
-          )?.label ?? "Clip",
+          view.metadata.clips.find((clip) => idsMatch(clip.id, frame.manifest.clip_id))?.label ??
+            "Clip",
           message.frame,
           view.metadata,
         ),
@@ -640,15 +593,9 @@ export async function paintFrameSet(
 
     const candidateCanvases = new Map(view.canvases);
     for (const target of targets) {
-      candidateCanvases.set(
-        target.decoded.manifest.clip_id,
-        target.stagedCanvas,
-      );
+      candidateCanvases.set(target.decoded.manifest.clip_id, target.stagedCanvas);
     }
-    const commitComparison = view.prepareComparisonCommit(
-      candidateCanvases,
-      message.frame,
-    );
+    const commitComparison = view.prepareComparisonCommit(candidateCanvases, message.frame);
     if (!shouldCommit()) {
       return false;
     }
@@ -657,18 +604,12 @@ export async function paintFrameSet(
     try {
       for (const target of targets) {
         if (target.parent !== undefined && target.currentCanvas !== undefined) {
-          target.parent.replaceChild(
-            target.stagedCanvas,
-            target.currentCanvas,
-          );
+          target.parent.replaceChild(target.stagedCanvas, target.currentCanvas);
         }
         committed.push(target);
       }
       for (const target of targets) {
-        view.canvases.set(
-          target.decoded.manifest.clip_id,
-          target.stagedCanvas,
-        );
+        view.canvases.set(target.decoded.manifest.clip_id, target.stagedCanvas);
       }
       commitComparison();
     } catch (error) {
@@ -678,18 +619,12 @@ export async function paintFrameSet(
           target.currentCanvas !== undefined &&
           target.stagedCanvas.parentNode === target.parent
         ) {
-          target.parent.replaceChild(
-            target.currentCanvas,
-            target.stagedCanvas,
-          );
+          target.parent.replaceChild(target.currentCanvas, target.stagedCanvas);
         }
         if (target.currentCanvas === undefined) {
           view.canvases.delete(target.decoded.manifest.clip_id);
         } else {
-          view.canvases.set(
-            target.decoded.manifest.clip_id,
-            target.currentCanvas,
-          );
+          view.canvases.set(target.decoded.manifest.clip_id, target.currentCanvas);
         }
       }
       throw error;

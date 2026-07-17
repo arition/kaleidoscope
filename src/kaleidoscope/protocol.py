@@ -269,11 +269,7 @@ def parse_frontend_message(value: object) -> FrontendMessage:
         overlay_opacity = value.get("overlay_opacity")
         valid_cardinality = (
             (mode == "single" and isinstance(clip_ids, list) and len(clip_ids) == 1)
-            or (
-                mode == "side-by-side"
-                and isinstance(clip_ids, list)
-                and 1 <= len(clip_ids) <= 4
-            )
+            or (mode == "side-by-side" and isinstance(clip_ids, list) and 1 <= len(clip_ids) <= 4)
             or (
                 isinstance(mode, str)
                 and mode in {"wipe", "overlay", "difference"}

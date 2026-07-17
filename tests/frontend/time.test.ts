@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  formatFrameTime,
-  frameFromTime,
-  parseTimeToFrame,
-} from "../../frontend/time.js";
+import { formatFrameTime, frameFromTime, parseTimeToFrame } from "../../frontend/time.js";
 
 describe("rational frame time conversion", () => {
   it("round-trips exact frame boundaries at 24000/1001 fps", () => {
@@ -16,14 +12,7 @@ describe("rational frame time conversion", () => {
 
   it("formats fractional-rate frames inside their own time interval", () => {
     for (const frame of [0, 1, 2, 3, 23, 24, 239]) {
-      expect(
-        parseTimeToFrame(
-          formatFrameTime(frame, 24000, 1001),
-          24000,
-          1001,
-          240,
-        ),
-      ).toBe(frame);
+      expect(parseTimeToFrame(formatFrameTime(frame, 24000, 1001), 24000, 1001, 240)).toBe(frame);
     }
   });
 

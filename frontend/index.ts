@@ -11,18 +11,11 @@ import {
   validateFrameSetBuffers,
 } from "./protocol.js";
 import type { FrameSetMessage, PreviewMetadataMessage } from "./protocol.js";
-import {
-  createComparisonState,
-  transitionComparisonState,
-} from "./comparison.js";
+import { createComparisonState, transitionComparisonState } from "./comparison.js";
 import type { ComparisonState } from "./comparison.js";
 import { paintFrameSet, renderMetadata } from "./player.js";
 import type { PlayerView } from "./player.js";
-import {
-  FrameRequestSequence,
-  PausedSeekScheduler,
-  PlaybackController,
-} from "./scheduler.js";
+import { FrameRequestSequence, PausedSeekScheduler, PlaybackController } from "./scheduler.js";
 import "./styles.css";
 
 function createStatus(text: string): HTMLElement {
@@ -79,10 +72,7 @@ function coordinatorFor(
   return coordinator;
 }
 
-function deleteCoordinator(
-  model: KaleidoscopeRenderProps["model"],
-  sessionId: string,
-): void {
+function deleteCoordinator(model: KaleidoscopeRenderProps["model"], sessionId: string): void {
   const managerCoordinators = modelCoordinators.get(model.widget_manager);
   managerCoordinators?.delete(sessionId);
   if (managerCoordinators?.size === 0) {
@@ -91,17 +81,13 @@ function deleteCoordinator(
 }
 
 function isCommLive(model: KaleidoscopeRenderProps["model"]): boolean {
-  const commLive = (
-    model as KaleidoscopeRenderProps["model"] & { comm_live?: unknown }
-  ).comm_live;
-  return commLive !== undefined
-    ? commLive !== false
-    : model.get("comm_live") !== false;
+  const commLive = (model as KaleidoscopeRenderProps["model"] & { comm_live?: unknown }).comm_live;
+  return commLive !== undefined ? commLive !== false : model.get("comm_live") !== false;
 }
 
 const WEBP_DECODE_PROBE = new Uint8Array([
-  82, 73, 70, 70, 28, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 15, 0, 0,
-  0, 47, 0, 0, 0, 0, 7, 16, 253, 143, 254, 7, 34, 162, 255, 1, 0,
+  82, 73, 70, 70, 28, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 15, 0, 0, 0, 47, 0, 0, 0, 0, 7, 16,
+  253, 143, 254, 7, 34, 162, 255, 1, 0,
 ]);
 
 async function supportsWebp(): Promise<boolean> {
@@ -136,9 +122,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   let playerView: PlayerView | undefined;
   let seekScheduler: PausedSeekScheduler | undefined;
   let playbackController: PlaybackController | undefined;
-  let currentRequest:
-    | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
-    | undefined;
+  let currentRequest: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined;
   let unacknowledgedDelivery:
     | {
         requestId: number;
@@ -154,9 +138,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         resume: boolean;
       }
     | undefined;
-  let resumeAfterPaint:
-    | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
-    | undefined;
+  let resumeAfterPaint: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined;
   let resumeAfterScrub = false;
   let autoplayPending = false;
   let resumeAfterVisibility = false;
@@ -170,9 +152,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   const interactionBlocked = (): boolean => disconnected || terminal;
 
   const blockedStatus = (): string =>
-    disconnected
-      ? "Kernel disconnected. Preview paused."
-      : terminalStatus;
+    disconnected ? "Kernel disconnected. Preview paused." : terminalStatus;
 
   const requestsMatch = (
     left: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined,
@@ -200,9 +180,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
   };
 
   const setCurrentRequest = (
-    request:
-      | Pick<FrameSetMessage, "request_id" | "generation" | "frame">
-      | undefined,
+    request: Pick<FrameSetMessage, "request_id" | "generation" | "frame"> | undefined,
   ): void => {
     if (
       unacknowledgedDelivery !== undefined &&
@@ -280,31 +258,15 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     updateStatus(text);
   };
 
-  const handleMessage = async (
-    value: unknown,
-    buffers: DataView[],
-  ): Promise<void> => {
+  const handleMessage = async (value: unknown, buffers: DataView[]): Promise<void> => {
     try {
       const message = parseBackendMessage(value);
       if (message.session_id !== sessionId) {
         throw new ProtocolError("invalid_message", "Backend message has an unknown session.");
       }
-      if (
-        message.type === "frame_set" &&
-        (metadata === undefined || playerView === undefined)
-      ) {
-        lastAcknowledgedRequestId = Math.max(
-          lastAcknowledgedRequestId,
-          message.request_id,
-        );
-        model.send(
-          createFrameSetAck(
-            sessionId,
-            message.request_id,
-            message.generation,
-            "stale",
-          ),
-        );
+      if (message.type === "frame_set" && (metadata === undefined || playerView === undefined)) {
+        lastAcknowledgedRequestId = Math.max(lastAcknowledgedRequestId, message.request_id);
+        model.send(createFrameSetAck(sessionId, message.request_id, message.generation, "stale"));
         return;
       }
       if (message.type === "metadata") {
@@ -378,16 +340,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                 const previous = comparisonState;
                 let next;
                 try {
-                  next = transitionComparisonState(
-                    previous,
-                    metadata,
-                    transition,
-                  );
+                  next = transitionComparisonState(previous, metadata, transition);
                 } catch (error) {
                   updateStatus(
-                    error instanceof Error
-                      ? error.message
-                      : "Invalid comparison selection.",
+                    error instanceof Error ? error.message : "Invalid comparison selection.",
                   );
                   playerView?.setComparison(previous);
                   return;
@@ -399,13 +355,11 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                   mode: next.state.mode,
                   active_clip_ids: [...next.state.activeClipIds],
                 };
-                const deferComposition =
-                  next.requiresFrameSet || comparisonFrameRequired;
+                const deferComposition = next.requiresFrameSet || comparisonFrameRequired;
                 playerView?.setComparison(next.state, deferComposition);
 
                 const needsFrameSet =
-                  next.requiresFrameSet ||
-                  (comparisonFrameRequired && !comparisonFramePending);
+                  next.requiresFrameSet || (comparisonFrameRequired && !comparisonFramePending);
 
                 const durableViewChanged =
                   previous.mode !== next.state.mode ||
@@ -436,7 +390,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
                 const frame =
                   playbackController?.playing === true
                     ? playbackController.pause(false)
-                    : playerView?.getFrame() ?? 0;
+                    : (playerView?.getFrame() ?? 0);
                 setCurrentRequest(undefined);
                 resumeAfterPaint = undefined;
                 resumeAfterScrub = false;
@@ -471,13 +425,10 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
             scheduler: seekScheduler,
             onFrame: (frame) => playerView?.setFrame(frame),
             onPlaying: (playing) => playerView?.setPlaying(playing),
-            sendPlaying: (playing) =>
-              model.send(createSetPlayingMessage(sessionId, playing)),
+            sendPlaying: (playing) => model.send(createSetPlayingMessage(sessionId, playing)),
           });
           autoplayPending = message.autoplay;
-          seekScheduler.requestExact(
-            Math.min(message.num_frames - 1, coordinator.currentFrame),
-          );
+          seekScheduler.requestExact(Math.min(message.num_frames - 1, coordinator.currentFrame));
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
@@ -506,8 +457,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           );
         }
         const expected = currentRequest;
-        const expectedClipIds =
-          comparisonState?.activeClipIds ?? metadata.active_clip_ids;
+        const expectedClipIds = comparisonState?.activeClipIds ?? metadata.active_clip_ids;
         const manifestClipIds = message.frames.map((frame) => frame.clip_id);
         const isCurrent = (): boolean =>
           !signal.aborted &&
@@ -517,20 +467,13 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           message.generation === expected.generation &&
           message.frame === expected.frame &&
           manifestClipIds.length === expectedClipIds.length &&
-          manifestClipIds.every(
-            (clipId, index) => clipId === expectedClipIds[index],
-          );
-        const acknowledge = (
-          outcome: "painted" | "stale" | "decode_error",
-        ): void => {
+          manifestClipIds.every((clipId, index) => clipId === expectedClipIds[index]);
+        const acknowledge = (outcome: "painted" | "stale" | "decode_error"): void => {
           if (acknowledged) {
             return;
           }
           acknowledged = true;
-          lastAcknowledgedRequestId = Math.max(
-            lastAcknowledgedRequestId,
-            message.request_id,
-          );
+          lastAcknowledgedRequestId = Math.max(lastAcknowledgedRequestId, message.request_id);
           if (outcome !== "painted") {
             deliveryController.abort();
           }
@@ -540,14 +483,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           ) {
             unacknowledgedDelivery = undefined;
           }
-          model.send(
-            createFrameSetAck(
-              sessionId,
-              message.request_id,
-              message.generation,
-              outcome,
-            ),
-          );
+          model.send(createFrameSetAck(sessionId, message.request_id, message.generation, outcome));
         };
         let acknowledged = false;
         const deliveryController = new AbortController();
@@ -602,9 +538,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
           setCurrentRequest(undefined);
           playbackController?.pause(false);
           updateStatus(
-            error instanceof Error
-              ? `Frame decode error: ${error.message}`
-              : "Frame decode error.",
+            error instanceof Error ? `Frame decode error: ${error.message}` : "Frame decode error.",
           );
           return;
         } finally {
@@ -653,9 +587,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
         setCurrentRequest(undefined);
         playbackController?.pause(false);
       }
-      const clip = metadata?.clips.find(
-        (candidate) => candidate.id === message.clip_id,
-      );
+      const clip = metadata?.clips.find((candidate) => candidate.id === message.clip_id);
       const errorStatus =
         clip === undefined
           ? `Protocol error: ${message.message}`
@@ -693,8 +625,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
     if (document.visibilityState === "hidden") {
       if (playbackController?.playing) {
         const pausedFrame = playbackController.pause(false);
-        resumeAfterVisibility =
-          metadata !== undefined && pausedFrame < metadata.num_frames - 1;
+        resumeAfterVisibility = metadata !== undefined && pausedFrame < metadata.num_frames - 1;
         setCurrentRequest(undefined);
       }
     } else if (resumeAfterVisibility) {
@@ -770,9 +701,7 @@ export function render({ model, el, signal }: KaleidoscopeRenderProps): void {
       coordinator.views.delete(coordinatedView);
       if (wasActive) {
         coordinator.active = undefined;
-        const next = coordinator.views.values().next().value as
-          | CoordinatedView
-          | undefined;
+        const next = coordinator.views.values().next().value as CoordinatedView | undefined;
         if (next !== undefined) {
           coordinator.active = next;
           next.activate();

@@ -36,9 +36,7 @@ class VideoNodeLike(Protocol):
     def get_frame_async(self, frame: int) -> Future[Any]: ...
 
 
-type ClipInput = (
-    VideoNodeLike | Sequence[VideoNodeLike] | Mapping[ClipId, VideoNodeLike]
-)
+type ClipInput = VideoNodeLike | Sequence[VideoNodeLike] | Mapping[ClipId, VideoNodeLike]
 
 
 def preview(

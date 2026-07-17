@@ -80,8 +80,8 @@ class PreviewSession:
         self._last_generation = -1
         self._unacknowledged: _CompletedFrameSet | None = None
         self._pending_delivery: _CompletedFrameSet | None = None
-        self._cache: ByteBoundedLRU[tuple[ClipId, int], _CompletedFrame] = (
-            ByteBoundedLRU(config.cache_size, DEFAULT_CACHE_BYTE_BUDGET)
+        self._cache: ByteBoundedLRU[tuple[ClipId, int], _CompletedFrame] = ByteBoundedLRU(
+            config.cache_size, DEFAULT_CACHE_BYTE_BUDGET
         )
         self._scheduler = FrameSetScheduler(config.max_in_flight)
         self._closed = False
@@ -132,9 +132,7 @@ class PreviewSession:
                     or acknowledged.request_id != request_id
                     or acknowledged.generation != generation
                 ):
-                    raise ValueError(
-                        "Frame-set ACK does not match the unacknowledged delivery."
-                    )
+                    raise ValueError("Frame-set ACK does not match the unacknowledged delivery.")
                 self._unacknowledged = None
                 if outcome == "decode_error":
                     self._pending_delivery = None
@@ -292,13 +290,9 @@ class PreviewSession:
             with self._lock:
                 if self._closed:
                     return
-                if (
-                    request_id <= self._last_request_id
-                    or generation < self._last_generation
-                ):
+                if request_id <= self._last_request_id or generation < self._last_generation:
                     raise ValueError(
-                        "Request IDs must increase monotonically and generations "
-                        "must not decrease."
+                        "Request IDs must increase monotonically and generations must not decrease."
                     )
                 if generation > self._last_generation:
                     self._advance_generation_locked(generation)
@@ -331,8 +325,7 @@ class PreviewSession:
                 if len(request.completed) != len(request.clip_ids):
                     return
                 completed_frames = [
-                    request.completed[completed_clip_id]
-                    for completed_clip_id in request.clip_ids
+                    request.completed[completed_clip_id] for completed_clip_id in request.clip_ids
                 ]
                 manifests: list[FrameManifest] = []
                 buffers: list[bytes] = []

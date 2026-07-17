@@ -63,11 +63,7 @@ class FrameSetScheduler:
 
     def _take_next(self) -> ScheduledFrame | None:
         with self._lock:
-            if (
-                self._closed
-                or self._in_flight >= self._max_in_flight
-                or not self._pending
-            ):
+            if self._closed or self._in_flight >= self._max_in_flight or not self._pending:
                 return None
             self._in_flight += 1
             frame = self._pending.popleft()

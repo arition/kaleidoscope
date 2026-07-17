@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createComparisonState,
-  transitionComparisonState,
-} from "../../frontend/comparison.js";
+import { createComparisonState, transitionComparisonState } from "../../frontend/comparison.js";
 import type { PreviewMetadataMessage } from "../../frontend/protocol.js";
 
 const metadata: PreviewMetadataMessage = {
@@ -101,9 +98,7 @@ describe("comparison state", () => {
     const mismatched: PreviewMetadataMessage = {
       ...metadata,
       clips: metadata.clips.map((clip) =>
-        clip.id === "Reference"
-          ? { ...clip, source_width: 1280, output_width: 1280 }
-          : clip,
+        clip.id === "Reference" ? { ...clip, source_width: 1280, output_width: 1280 } : clip,
       ),
     };
     expect(() =>
@@ -132,11 +127,9 @@ describe("comparison state", () => {
       ),
     };
 
-    const next = transitionComparisonState(
-      createComparisonState(mixedGeometry),
-      mixedGeometry,
-      { mode: "wipe" },
-    );
+    const next = transitionComparisonState(createComparisonState(mixedGeometry), mixedGeometry, {
+      mode: "wipe",
+    });
 
     expect(next.state.activeClipIds).toEqual(["Filtered", "Reference"]);
     expect(next.requiresFrameSet).toBe(true);
@@ -146,11 +139,9 @@ describe("comparison state", () => {
     const singleVisible = { ...metadata, max_visible_clips: 1 };
 
     expect(() =>
-      transitionComparisonState(
-        createComparisonState(singleVisible),
-        singleVisible,
-        { mode: "wipe" },
-      ),
+      transitionComparisonState(createComparisonState(singleVisible), singleVisible, {
+        mode: "wipe",
+      }),
     ).toThrow("visible-clip limit");
   });
 });

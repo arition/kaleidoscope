@@ -34,9 +34,7 @@ def only_wheel() -> Path:
 
 
 def pip_environment() -> dict[str, str]:
-    environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("PIP_")
-    }
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("PIP_")}
     for variable in ("PYTHONHOME", "PYTHONPATH"):
         environment.pop(variable, None)
     environment.update(
@@ -81,17 +79,14 @@ def sync_directory(directory: Path) -> None:
 def write_manifest(directory: Path, release_wheel: Path) -> None:
     entries = sorted(directory.iterdir())
     if not entries or any(
-        entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl"
-        for entry in entries
+        entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl" for entry in entries
     ):
         raise RuntimeError("Wheelhouse download must contain only regular wheel files")
     downloaded_wheel = directory / WHEEL_NAME
     if not downloaded_wheel.is_file():
         raise RuntimeError(f"Downloaded wheelhouse is missing {WHEEL_NAME}")
     if downloaded_wheel.read_bytes() != release_wheel.read_bytes():
-        raise RuntimeError(
-            "Downloaded package wheel does not match the release artifact"
-        )
+        raise RuntimeError("Downloaded package wheel does not match the release artifact")
     manifest = {
         "algorithm": "sha256",
         "files": {entry.name: file_hash(entry) for entry in entries},
@@ -115,8 +110,7 @@ def copy_prefetched_wheels(
         raise RuntimeError(f"Expected prefetched wheel directory at {source}")
     entries = sorted(source.iterdir())
     if not entries or any(
-        entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl"
-        for entry in entries
+        entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl" for entry in entries
     ):
         raise RuntimeError("Prefetched dependencies must contain only wheel files")
     for entry in entries:
@@ -130,9 +124,7 @@ def exchange_directories(left: Path, right: Path) -> None:
     try:
         renameat2 = library.renameat2
     except AttributeError as error:
-        raise RuntimeError(
-            "Linux renameat2 is required for wheelhouse publication"
-        ) from error
+        raise RuntimeError("Linux renameat2 is required for wheelhouse publication") from error
     renameat2.argtypes = [
         ctypes.c_int,
         ctypes.c_char_p,

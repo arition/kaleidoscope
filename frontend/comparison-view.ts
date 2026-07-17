@@ -1,25 +1,17 @@
 import { createComparisonState } from "./comparison.js";
-import type {
-  ComparisonState,
-  ComparisonTransition,
-} from "./comparison.js";
-import type {
-  ClipId,
-  ClipMetadata,
-  ComparisonMode,
-  PreviewMetadataMessage,
-} from "./protocol.js";
+import type { ComparisonState, ComparisonTransition } from "./comparison.js";
+import type { ClipId, ClipMetadata, ComparisonMode, PreviewMetadataMessage } from "./protocol.js";
 import { formatFrameTime } from "./time.js";
 
 export interface ComparisonViewController {
   readonly toolbar: HTMLElement;
   readonly view: HTMLElement;
-  compose(): void;
-  prepareCommit(
+  compose: () => void;
+  prepareCommit: (
     candidateCanvases: ReadonlyMap<ClipId, HTMLCanvasElement>,
     frame?: number,
-  ): () => void;
-  setState(state: ComparisonState, deferComposition?: boolean): void;
+  ) => () => void;
+  setState: (state: ComparisonState, deferComposition?: boolean) => void;
 }
 
 interface ComparisonViewOptions {
@@ -29,37 +21,22 @@ interface ComparisonViewOptions {
   modeLabel: HTMLElement;
   clips: HTMLElement;
   onChange?: (transition: ComparisonTransition) => void;
-  updateClipRow(
+  updateClipRow: (
     row: HTMLElement,
     clip: ClipMetadata,
     active: boolean,
     aligned: boolean,
     canvases: Map<ClipId, HTMLCanvasElement>,
-  ): void;
+  ) => void;
   signal?: AbortSignal;
 }
 
-const ALIGNED_MODES: ReadonlySet<ComparisonMode> = new Set([
-  "wipe",
-  "overlay",
-  "difference",
-]);
+const ALIGNED_MODES: ReadonlySet<ComparisonMode> = new Set(["wipe", "overlay", "difference"]);
 
 const idsMatch = (left: ClipId, right: ClipId): boolean => left === right;
 
-export function createComparisonView(
-  options: ComparisonViewOptions,
-): ComparisonViewController {
-  const {
-    metadata,
-    canvases,
-    rows,
-    modeLabel,
-    clips,
-    onChange,
-    updateClipRow,
-    signal,
-  } = options;
+export function createComparisonView(options: ComparisonViewOptions): ComparisonViewController {
+  const { metadata, canvases, rows, modeLabel, clips, onChange, updateClipRow, signal } = options;
   let state = createComparisonState(metadata);
   let committedState = state;
   let committedFrame = 0;
@@ -110,8 +87,7 @@ export function createComparisonView(
 
   const optionValue = (clipId: ClipId): string =>
     String(metadata.clips.findIndex((clip) => idsMatch(clip.id, clipId)));
-  const optionClipId = (value: string): ClipId =>
-    metadata.clips[Number(value)].id;
+  const optionClipId = (value: string): ClipId => metadata.clips[Number(value)].id;
 
   const createClipSelect = (
     label: string,
@@ -163,8 +139,7 @@ export function createComparisonView(
       button.setAttribute("aria-label", `${label} view`);
       button.disabled =
         onChange === undefined ||
-        (ALIGNED_MODES.has(value) &&
-          (!hasAlignedPair || metadata.max_visible_clips < 2));
+        (ALIGNED_MODES.has(value) && (!hasAlignedPair || metadata.max_visible_clips < 2));
       button.addEventListener("click", () => onChange?.({ mode: value }), {
         signal,
       });
@@ -177,9 +152,7 @@ export function createComparisonView(
     selectionControl.replaceChildren();
     if (state.mode === "single") {
       selectionControl.append(
-        createClipSelect("Solo clip", state.primary, (primary) =>
-          onChange?.({ primary }),
-        ),
+        createClipSelect("Solo clip", state.primary, (primary) => onChange?.({ primary })),
       );
       return;
     }
@@ -259,11 +232,9 @@ export function createComparisonView(
       wipe.step = "1";
       wipe.value = String(Math.round(state.wipePosition * 100));
       wipe.setAttribute("aria-label", "Wipe position");
-      wipe.addEventListener(
-        "input",
-        () => onChange?.({ wipePosition: Number(wipe.value) / 100 }),
-        { signal },
-      );
+      wipe.addEventListener("input", () => onChange?.({ wipePosition: Number(wipe.value) / 100 }), {
+        signal,
+      });
       comparisonStage.append(wipe);
     } else if (state.mode === "overlay") {
       const label = document.createElement("label");
@@ -328,42 +299,19 @@ export function createComparisonView(
       if (next.mode === "wipe") {
         context.save();
         context.beginPath();
-        context.rect(
-          0,
-          0,
-          stagedComparison.width * next.wipePosition,
-          stagedComparison.height,
-        );
+        context.rect(0, 0, stagedComparison.width * next.wipePosition, stagedComparison.height);
         context.clip();
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height,
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       } else if (next.mode === "overlay") {
         context.save();
         context.globalAlpha = next.overlayOpacity;
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height,
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       } else {
         context.save();
         context.globalCompositeOperation = "difference";
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height,
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       }
       stagedComparison.setAttribute(
@@ -469,16 +417,11 @@ export function createComparisonView(
     prepareCommit(canvases)();
   };
 
-  const setState = (
-    next: ComparisonState,
-    deferComposition = false,
-  ): void => {
+  const setState = (next: ComparisonState, deferComposition = false): void => {
     const structuralChange =
       next.mode !== state.mode ||
       next.activeClipIds.length !== state.activeClipIds.length ||
-      next.activeClipIds.some(
-        (clipId, index) => !idsMatch(clipId, state.activeClipIds[index]),
-      );
+      next.activeClipIds.some((clipId, index) => !idsMatch(clipId, state.activeClipIds[index]));
     state = next;
     for (const [value, button] of modeButtons) {
       button.setAttribute("aria-pressed", String(value === state.mode));

@@ -222,10 +222,8 @@ describe("PausedSeekScheduler", () => {
     });
 
     scheduler.requestExact(0);
-    const request = scheduler.requestView(
-      7,
-      ["Source", "Reference"],
-      (generation) => order.push({ type: "set_view", generation }),
+    const request = scheduler.requestView(7, ["Source", "Reference"], (generation) =>
+      order.push({ type: "set_view", generation }),
     );
 
     expect(request).toEqual({ request_id: 1, generation: 1, frame: 7 });

@@ -31,9 +31,7 @@ test("paints an RGB24 frame", async ({ page }) => {
   await expect(page.getByRole("status")).toHaveText("Frame 0 ready.");
 
   const messages = await page.evaluate(() => {
-    return (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages;
+    return (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages;
   });
   const ready = messages.find(
     (message) =>
@@ -105,9 +103,7 @@ test("paints a WebP frame through the negotiated decoder", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
-test("shows automatic RGB24 conversion warning and paints the frame", async ({
-  page,
-}) => {
+test("shows automatic RGB24 conversion warning and paints the frame", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -156,9 +152,8 @@ test("atomic side-by-side paints a labeled frame set", async ({ page }) => {
   await expect(previewClips.getByText("Filtered", { exact: true })).toBeVisible();
 
   const request = await page.evaluate(() => {
-    const messages = (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages;
+    const messages = (window as typeof window & { __kaleidoscopeMessages: unknown[] })
+      .__kaleidoscopeMessages;
     return messages.find(
       (message) =>
         typeof message === "object" &&
@@ -201,9 +196,7 @@ test("atomic side-by-side paints a labeled frame set", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
-test("wipe is keyboard-operable and reuses the synchronized pair", async ({
-  page,
-}) => {
+test("wipe is keyboard-operable and reuses the synchronized pair", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -222,28 +215,24 @@ test("wipe is keyboard-operable and reuses the synchronized pair", async ({
   await wipe.press("ArrowRight");
   await expect(wipe).toHaveValue("51");
 
-  const pixels = await page
-    .locator(".kaleidoscope-comparison__canvas")
-    .evaluate((element) => {
-      const canvas = element as HTMLCanvasElement;
-      const context = canvas.getContext("2d");
-      if (context === null) {
-        throw new Error("Canvas 2D context is unavailable.");
-      }
-      return {
-        left: Array.from(context.getImageData(16, 24, 1, 1).data),
-        right: Array.from(context.getImageData(48, 24, 1, 1).data),
-      };
-    });
+  const pixels = await page.locator(".kaleidoscope-comparison__canvas").evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new Error("Canvas 2D context is unavailable.");
+    }
+    return {
+      left: Array.from(context.getImageData(16, 24, 1, 1).data),
+      right: Array.from(context.getImageData(48, 24, 1, 1).data),
+    };
+  });
   expect(pixels.left[0]).toBeLessThan(60);
   expect(pixels.left[1]).toBeGreaterThan(160);
   expect(pixels.right[0]).toBeGreaterThan(200);
   expect(pixels.right[1]).toBeLessThan(70);
 
   const requests = await page.evaluate(() =>
-    (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages.filter(
+    (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages.filter(
       (message) =>
         typeof message === "object" &&
         message !== null &&
@@ -255,9 +244,7 @@ test("wipe is keyboard-operable and reuses the synchronized pair", async ({
   expect(browserErrors).toEqual([]);
 });
 
-test("overlay and difference compose locally without rerendering", async ({
-  page,
-}) => {
+test("overlay and difference compose locally without rerendering", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?comparison=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -296,9 +283,7 @@ test("overlay and difference compose locally without rerendering", async ({
   expect(differencePixel[2]).toBeGreaterThan(180);
 
   const requests = await page.evaluate(() =>
-    (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages.filter(
+    (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages.filter(
       (message) =>
         typeof message === "object" &&
         message !== null &&
@@ -309,9 +294,7 @@ test("overlay and difference compose locally without rerendering", async ({
   expect(requests).toHaveLength(1);
 });
 
-test("single pair and grid selectors update ordered active clips", async ({
-  page,
-}) => {
+test("single pair and grid selectors update ordered active clips", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?comparison=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -332,10 +315,8 @@ test("single pair and grid selectors update ordered active clips", async ({
   await expect(page.getByLabel("Show Filtered")).toBeChecked();
   await expect(page.getByLabel("Show Source")).toBeDisabled();
 
-  const messages = await page.evaluate(() =>
-    (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages,
+  const messages = await page.evaluate(
+    () => (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages,
   );
   const changedViews = messages.filter(
     (message) =>
@@ -359,12 +340,7 @@ test("single pair and grid selectors update ordered active clips", async ({
     { generation: 5, mode: "side-by-side", clip_ids: ["Filtered", "Reference"] },
   ]);
   expect(requests.map((message) => (message as { generation: number }).generation)).toEqual([
-    0,
-    1,
-    2,
-    3,
-    4,
-    5,
+    0, 1, 2, 3, 4, 5,
   ]);
 });
 
@@ -412,9 +388,7 @@ test("rapid seek keeps the latest exact paused frame", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
-test("paused navigation reaches exact first middle and last frames", async ({
-  page,
-}) => {
+test("paused navigation reaches exact first middle and last frames", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?rapid-seek=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -433,9 +407,7 @@ test("paused navigation reaches exact first middle and last frames", async ({
   await expect(page.getByRole("img", { name: "Source, frame 0" })).toBeVisible();
 
   const requestFrames = await page.evaluate(() => {
-    return (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages
+    return (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages
       .filter(
         (message) =>
           typeof message === "object" &&
@@ -456,12 +428,8 @@ test("responsive controls fit a narrow notebook", async ({ page }) => {
   const geometry = await page.evaluate(() => {
     const widget = document.querySelector<HTMLElement>(".kaleidoscope-widget");
     const seek = document.querySelector<HTMLInputElement>(".kaleidoscope-seek");
-    const frame = document.querySelector<HTMLInputElement>(
-      ".kaleidoscope-frame-input",
-    );
-    const time = document.querySelector<HTMLInputElement>(
-      ".kaleidoscope-time-input",
-    );
+    const frame = document.querySelector<HTMLInputElement>(".kaleidoscope-frame-input");
+    const time = document.querySelector<HTMLInputElement>(".kaleidoscope-time-input");
     if (widget === null || seek === null || frame === null || time === null) {
       throw new Error("Paused navigation controls are unavailable.");
     }
@@ -483,9 +451,7 @@ test("responsive controls fit a narrow notebook", async ({ page }) => {
   });
 });
 
-test("responsive comparison modes remain reachable in a narrow notebook", async ({
-  page,
-}) => {
+test("responsive comparison modes remain reachable in a narrow notebook", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/tests/e2e/harness/?side-by-side=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
@@ -494,13 +460,11 @@ test("responsive comparison modes remain reachable in a narrow notebook", async 
     .getByRole("group", { name: "Comparison mode" })
     .evaluate((element) => ({
       overflow: element.scrollWidth - element.clientWidth,
-      visibleButtons: Array.from(element.querySelectorAll("button")).every(
-        (button) => {
-          const bounds = button.getBoundingClientRect();
-          const container = element.getBoundingClientRect();
-          return bounds.left >= container.left && bounds.right <= container.right;
-        },
-      ),
+      visibleButtons: Array.from(element.querySelectorAll("button")).every((button) => {
+        const bounds = button.getBoundingClientRect();
+        const container = element.getBoundingClientRect();
+        return bounds.left >= container.left && bounds.right <= container.right;
+      }),
     }));
   expect(geometry.overflow).toBeLessThanOrEqual(0);
   expect(geometry.visibleButtons).toBe(true);
@@ -538,9 +502,7 @@ test("responsive desktop and fullscreen layouts remain framed", async ({ page })
   await player.focus();
   await player.press("f");
   await expect(page.getByRole("button", { name: "Exit fullscreen" })).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => document.fullscreenElement !== null))
-    .toBe(true);
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(true);
   const fullscreenGeometry = await player.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return {
@@ -559,13 +521,16 @@ test("responsive desktop and fullscreen layouts remain framed", async ({ page })
     contentType: "image/png",
   });
 
-  const pixel = await page.locator(".kaleidoscope-canvas").first().evaluate((element) => {
-    const context = (element as HTMLCanvasElement).getContext("2d");
-    if (context === null) {
-      throw new Error("Canvas 2D context is unavailable.");
-    }
-    return Array.from(context.getImageData(32, 24, 1, 1).data);
-  });
+  const pixel = await page
+    .locator(".kaleidoscope-canvas")
+    .first()
+    .evaluate((element) => {
+      const context = (element as HTMLCanvasElement).getContext("2d");
+      if (context === null) {
+        throw new Error("Canvas 2D context is unavailable.");
+      }
+      return Array.from(context.getImageData(32, 24, 1, 1).data);
+    });
   expect(pixel[3]).toBe(255);
   expect(browserErrors).toEqual([]);
 });
@@ -595,16 +560,13 @@ for (const theme of ["light", "dark"] as const) {
       .analyze();
     expect(
       results.violations.filter(
-        (violation) =>
-          violation.impact === "serious" || violation.impact === "critical",
+        (violation) => violation.impact === "serious" || violation.impact === "critical",
       ),
     ).toEqual([]);
   });
 }
 
-test("playback pauses at the final frame and restarts from zero", async ({
-  page,
-}) => {
+test("playback pauses at the final frame and restarts from zero", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?playback=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -616,9 +578,8 @@ test("playback pauses at the final frame and restarts from zero", async ({
   await expect
     .poll(async () => {
       return page.evaluate(() => {
-        const messages = (
-          window as typeof window & { __kaleidoscopeMessages: unknown[] }
-        ).__kaleidoscopeMessages;
+        const messages = (window as typeof window & { __kaleidoscopeMessages: unknown[] })
+          .__kaleidoscopeMessages;
         return messages.filter(
           (message) =>
             typeof message === "object" &&
@@ -630,14 +591,10 @@ test("playback pauses at the final frame and restarts from zero", async ({
         );
       });
     })
-    .toContainEqual(
-      expect.objectContaining({ frame: 0, generation: 1, reason: "playback" }),
-    );
+    .toContainEqual(expect.objectContaining({ frame: 0, generation: 1, reason: "playback" }));
 });
 
-test("slow playback completion cannot replace or re-ack the latest frame", async ({
-  page,
-}) => {
+test("slow playback completion cannot replace or re-ack the latest frame", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?slow-playback=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -648,9 +605,8 @@ test("slow playback completion cannot replace or re-ack the latest frame", async
   await expect(page.getByRole("img", { name: "Source, frame 5" })).toBeVisible();
 
   const delayedDelivery = await page.evaluate(() => {
-    const messages = (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages;
+    const messages = (window as typeof window & { __kaleidoscopeMessages: unknown[] })
+      .__kaleidoscopeMessages;
     const request = messages.find(
       (message) =>
         typeof message === "object" &&
@@ -680,9 +636,7 @@ test("slow playback completion cannot replace or re-ack the latest frame", async
   expect(delayedDelivery.ackCount).toBe(0);
 });
 
-test("visibility resumes only playback that was active before hiding", async ({
-  page,
-}) => {
+test("visibility resumes only playback that was active before hiding", async ({ page }) => {
   await page.goto("/tests/e2e/harness/?playback=1");
   await expect(page.getByRole("status").last()).toHaveText("Frame 0 ready.");
 
@@ -702,9 +656,7 @@ test("visibility resumes only playback that was active before hiding", async ({
   await expect
     .poll(async () => {
       return page.evaluate(() =>
-        (
-          window as typeof window & { __kaleidoscopeMessages: unknown[] }
-        ).__kaleidoscopeMessages
+        (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages
           .filter(
             (message) =>
               typeof message === "object" &&
@@ -732,9 +684,7 @@ test("visibility resumes only playback that was active before hiding", async ({
   });
 
   const playingStates = await page.evaluate(() =>
-    (
-      window as typeof window & { __kaleidoscopeMessages: unknown[] }
-    ).__kaleidoscopeMessages
+    (window as typeof window & { __kaleidoscopeMessages: unknown[] }).__kaleidoscopeMessages
       .filter(
         (message) =>
           typeof message === "object" &&

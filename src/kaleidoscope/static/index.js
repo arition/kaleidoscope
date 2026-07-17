@@ -50,10 +50,7 @@ function isFrameSetMessage(value) {
   }
   const bufferIndices = frames.map((frame) => frame.buffer_index);
   const clipIds = frames.map((frame) => frame.clip_id);
-  const totalBytes = frames.reduce(
-    (total, frame) => total + frame.byte_length,
-    0
-  );
+  const totalBytes = frames.reduce((total, frame) => total + frame.byte_length, 0);
   return new Set(bufferIndices).size === bufferIndices.length && bufferIndices.every((bufferIndex, index) => bufferIndex === index) && new Set(clipIds).size === clipIds.length && totalBytes <= MAX_FRAME_SET_BYTES;
 }
 function hasPreviewMetadataFields(value) {
@@ -76,9 +73,7 @@ function isPreviewMetadataMessage(value) {
   const clips = value.clips;
   const clipIds = clips.map((clip) => clip.id);
   const activeIds = value.active_clip_ids;
-  const activeClips = activeIds.map(
-    (activeId) => clips.find((clip) => clip.id === activeId)
-  );
+  const activeClips = activeIds.map((activeId) => clips.find((clip) => clip.id === activeId));
   const validCardinality = value.mode === "single" && activeIds.length === 1 || value.mode === "side-by-side" && activeIds.length >= 1 || (value.mode === "wipe" || value.mode === "overlay" || value.mode === "difference") && activeIds.length === 2;
   const validAlignedGeometry = value.mode === "single" || value.mode === "side-by-side" || activeClips.length === 2 && activeClips[0] !== void 0 && activeClips[1] !== void 0 && activeClips[0].source_width === activeClips[1].source_width && activeClips[0].source_height === activeClips[1].source_height;
   return new Set(clipIds).size === clipIds.length && new Set(activeIds).size === activeIds.length && activeIds.length <= value.max_visible_clips && activeIds.every((activeId) => clipIds.some((clipId) => clipId === activeId)) && validCardinality && validAlignedGeometry;
@@ -141,10 +136,7 @@ function createSetPlayingMessage(sessionId, playing) {
 }
 function validateFrameSetBuffers(message, buffers) {
   if (buffers.length !== message.frames.length) {
-    throw new ProtocolError(
-      "invalid_message",
-      "Frame payload count does not match its manifest."
-    );
+    throw new ProtocolError("invalid_message", "Frame payload count does not match its manifest.");
   }
   for (const frame of message.frames) {
     const buffer = buffers[frame.buffer_index];
@@ -185,10 +177,7 @@ function parseBackendMessage(value) {
   if (value.type === "error" && typeof value.session_id === "string" && value.session_id.length > 0 && isBackendErrorCode(value.code) && typeof value.message === "string" && typeof value.recoverable === "boolean") {
     const hasRequestContext = "request_id" in value || "generation" in value || "clip_id" in value;
     if (hasRequestContext && (!isNonnegativeInteger(value.request_id) || !isNonnegativeInteger(value.generation) || !isClipId(value.clip_id))) {
-      throw new ProtocolError(
-        "invalid_message",
-        "Malformed backend error context."
-      );
+      throw new ProtocolError("invalid_message", "Malformed backend error context.");
     }
     const runtimeClipError = isRuntimeClipErrorCode(value.code);
     if (runtimeClipError && (!value.recoverable || !hasRequestContext) || !runtimeClipError && (value.recoverable || hasRequestContext)) {
@@ -203,11 +192,7 @@ function parseBackendMessage(value) {
 }
 
 // frontend/comparison.ts
-var alignedModes = /* @__PURE__ */ new Set([
-  "wipe",
-  "overlay",
-  "difference"
-]);
+var alignedModes = /* @__PURE__ */ new Set(["wipe", "overlay", "difference"]);
 var idsEqual = (left, right) => left === right;
 var activeSetsEqual = (left, right) => left.length === right.length && left.every((clipId, index) => idsEqual(clipId, right[index]));
 var clipById = (metadata, clipId) => {
@@ -284,24 +269,15 @@ var transitionComparisonState = (current, metadata, transition) => {
     const selected = transition.selectedClipIds ?? current.activeClipIds;
     activeClipIds = normalizeSelection(metadata, selected);
     if (activeClipIds.length === 0 || activeClipIds.length > metadata.max_visible_clips) {
-      throw new Error(
-        `Side-by-side comparison requires 1-${metadata.max_visible_clips} clips.`
-      );
+      throw new Error(`Side-by-side comparison requires 1-${metadata.max_visible_clips} clips.`);
     }
     primary = activeClipIds[0];
     secondary = void 0;
   } else if (alignedModes.has(mode)) {
     if (metadata.max_visible_clips < 2) {
-      throw new Error(
-        "Aligned comparison exceeds the configured visible-clip limit."
-      );
+      throw new Error("Aligned comparison exceeds the configured visible-clip limit.");
     }
-    [primary, secondary] = resolvePair(
-      metadata,
-      current,
-      transition.primary,
-      transition.secondary
-    );
+    [primary, secondary] = resolvePair(metadata, current, transition.primary, transition.secondary);
     activeClipIds = [primary, secondary];
   } else {
     throw new Error(`Unsupported comparison mode ${mode}.`);
@@ -311,21 +287,12 @@ var transitionComparisonState = (current, metadata, transition) => {
     activeClipIds,
     primary,
     secondary,
-    overlayOpacity: Math.min(
-      1,
-      Math.max(0, transition.overlayOpacity ?? current.overlayOpacity)
-    ),
-    wipePosition: Math.min(
-      1,
-      Math.max(0, transition.wipePosition ?? current.wipePosition)
-    )
+    overlayOpacity: Math.min(1, Math.max(0, transition.overlayOpacity ?? current.overlayOpacity)),
+    wipePosition: Math.min(1, Math.max(0, transition.wipePosition ?? current.wipePosition))
   };
   return {
     state,
-    requiresFrameSet: !activeSetsEqual(
-      current.activeClipIds,
-      state.activeClipIds
-    )
+    requiresFrameSet: !activeSetsEqual(current.activeClipIds, state.activeClipIds)
   };
 };
 
@@ -343,10 +310,7 @@ function floorDivide(numerator, denominator) {
   return numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
 }
 function frameFromScaledSeconds(numerator, denominator, fpsNum, fpsDen, numFrames) {
-  const frame = floorDivide(
-    numerator * BigInt(fpsNum),
-    denominator * BigInt(fpsDen)
-  );
+  const frame = floorDivide(numerator * BigInt(fpsNum), denominator * BigInt(fpsDen));
   return clampFrame(frame, numFrames);
 }
 function decimalScale(fraction) {
@@ -386,19 +350,10 @@ function parseScaledSeconds(value) {
 }
 function parseTimeToFrame(value, fpsNum, fpsDen, numFrames) {
   const time = parseScaledSeconds(value);
-  return time === void 0 ? void 0 : frameFromScaledSeconds(
-    time.numerator,
-    time.denominator,
-    fpsNum,
-    fpsDen,
-    numFrames
-  );
+  return time === void 0 ? void 0 : frameFromScaledSeconds(time.numerator, time.denominator, fpsNum, fpsDen, numFrames);
 }
 function offsetFrameBySeconds(frame, seconds, fpsNum, fpsDen, numFrames) {
-  const frameOffset = floorDivide(
-    BigInt(Math.trunc(seconds)) * BigInt(fpsNum),
-    BigInt(fpsDen)
-  );
+  const frameOffset = floorDivide(BigInt(Math.trunc(seconds)) * BigInt(fpsNum), BigInt(fpsDen));
   return clampFrame(BigInt(frame) + frameOffset, numFrames);
 }
 function formatFrameTime(frame, fpsNum, fpsDen) {
@@ -420,23 +375,10 @@ function formatFrameTime(frame, fpsNum, fpsDen) {
 }
 
 // frontend/comparison-view.ts
-var ALIGNED_MODES = /* @__PURE__ */ new Set([
-  "wipe",
-  "overlay",
-  "difference"
-]);
+var ALIGNED_MODES = /* @__PURE__ */ new Set(["wipe", "overlay", "difference"]);
 var idsMatch = (left, right) => left === right;
 function createComparisonView(options) {
-  const {
-    metadata,
-    canvases,
-    rows,
-    modeLabel,
-    clips,
-    onChange,
-    updateClipRow: updateClipRow2,
-    signal
-  } = options;
+  const { metadata, canvases, rows, modeLabel, clips, onChange, updateClipRow: updateClipRow2, signal } = options;
   let state = createComparisonState(metadata);
   let committedState = state;
   let committedFrame = 0;
@@ -528,11 +470,7 @@ function createComparisonView(options) {
     selectionControl.replaceChildren();
     if (state.mode === "single") {
       selectionControl.append(
-        createClipSelect(
-          "Solo clip",
-          state.primary,
-          (primary2) => onChange?.({ primary: primary2 })
-        )
+        createClipSelect("Solo clip", state.primary, (primary2) => onChange?.({ primary: primary2 }))
       );
       return;
     }
@@ -594,11 +532,9 @@ function createComparisonView(options) {
       wipe.step = "1";
       wipe.value = String(Math.round(state.wipePosition * 100));
       wipe.setAttribute("aria-label", "Wipe position");
-      wipe.addEventListener(
-        "input",
-        () => onChange?.({ wipePosition: Number(wipe.value) / 100 }),
-        { signal }
-      );
+      wipe.addEventListener("input", () => onChange?.({ wipePosition: Number(wipe.value) / 100 }), {
+        signal
+      });
       comparisonStage.append(wipe);
     } else if (state.mode === "overlay") {
       const label = document.createElement("label");
@@ -655,42 +591,19 @@ function createComparisonView(options) {
       if (next.mode === "wipe") {
         context.save();
         context.beginPath();
-        context.rect(
-          0,
-          0,
-          stagedComparison.width * next.wipePosition,
-          stagedComparison.height
-        );
+        context.rect(0, 0, stagedComparison.width * next.wipePosition, stagedComparison.height);
         context.clip();
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       } else if (next.mode === "overlay") {
         context.save();
         context.globalAlpha = next.overlayOpacity;
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       } else {
         context.save();
         context.globalCompositeOperation = "difference";
-        context.drawImage(
-          second,
-          0,
-          0,
-          stagedComparison.width,
-          stagedComparison.height
-        );
+        context.drawImage(second, 0, 0, stagedComparison.width, stagedComparison.height);
         context.restore();
       }
       stagedComparison.setAttribute(
@@ -794,9 +707,7 @@ function createComparisonView(options) {
     prepareCommit(canvases)();
   };
   const setState = (next, deferComposition = false) => {
-    const structuralChange = next.mode !== state.mode || next.activeClipIds.length !== state.activeClipIds.length || next.activeClipIds.some(
-      (clipId, index) => !idsMatch(clipId, state.activeClipIds[index])
-    );
+    const structuralChange = next.mode !== state.mode || next.activeClipIds.length !== state.activeClipIds.length || next.activeClipIds.some((clipId, index) => !idsMatch(clipId, state.activeClipIds[index]));
     state = next;
     for (const [value, button] of modeButtons) {
       button.setAttribute("aria-pressed", String(value === state.mode));
@@ -962,9 +873,7 @@ function renderMetadata(root, message, navigation, signal) {
   play.type = "button";
   play.className = "kaleidoscope-control-button";
   play.disabled = navigation === void 0;
-  let playing = false;
   const updatePlaying = (active) => {
-    playing = active;
     play.setAttribute("aria-label", active ? "Pause" : "Play");
     play.title = active ? "Pause" : "Play";
     play.textContent = active ? "||" : ">";
@@ -1021,21 +930,9 @@ function renderMetadata(root, message, navigation, signal) {
     }
   };
   const first = createNavigationButton("First frame", "|<", () => 0);
-  const previous = createNavigationButton(
-    "Previous frame",
-    "<",
-    () => currentFrame - 1
-  );
-  const next = createNavigationButton(
-    "Next frame",
-    ">",
-    () => currentFrame + 1
-  );
-  const last = createNavigationButton(
-    "Last frame",
-    ">|",
-    () => message.num_frames - 1
-  );
+  const previous = createNavigationButton("Previous frame", "<", () => currentFrame - 1);
+  const next = createNavigationButton("Next frame", ">", () => currentFrame + 1);
+  const last = createNavigationButton("Last frame", ">|", () => message.num_frames - 1);
   const fullscreen = document.createElement("button");
   fullscreen.type = "button";
   fullscreen.className = "kaleidoscope-control-button";
@@ -1242,9 +1139,7 @@ async function decodeFrames(message, buffers, signal) {
     message.frames.map(async (manifest) => {
       const buffer = buffers[manifest.buffer_index];
       const payload = new Uint8Array(buffer.byteLength);
-      payload.set(
-        new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
-      );
+      payload.set(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
       const blob = new Blob([payload], {
         type: manifest.mime
       });
@@ -1305,19 +1200,11 @@ async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
       };
     });
     for (const { decoded: frame, stagedCanvas, context } of targets) {
-      context.drawImage(
-        frame.bitmap,
-        0,
-        0,
-        stagedCanvas.width,
-        stagedCanvas.height
-      );
+      context.drawImage(frame.bitmap, 0, 0, stagedCanvas.width, stagedCanvas.height);
       stagedCanvas.setAttribute(
         "aria-label",
         describeFrame(
-          view.metadata.clips.find(
-            (clip) => idsMatch2(clip.id, frame.manifest.clip_id)
-          )?.label ?? "Clip",
+          view.metadata.clips.find((clip) => idsMatch2(clip.id, frame.manifest.clip_id))?.label ?? "Clip",
           message.frame,
           view.metadata
         )
@@ -1328,15 +1215,9 @@ async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
     }
     const candidateCanvases = new Map(view.canvases);
     for (const target of targets) {
-      candidateCanvases.set(
-        target.decoded.manifest.clip_id,
-        target.stagedCanvas
-      );
+      candidateCanvases.set(target.decoded.manifest.clip_id, target.stagedCanvas);
     }
-    const commitComparison = view.prepareComparisonCommit(
-      candidateCanvases,
-      message.frame
-    );
+    const commitComparison = view.prepareComparisonCommit(candidateCanvases, message.frame);
     if (!shouldCommit()) {
       return false;
     }
@@ -1344,35 +1225,23 @@ async function paintFrameSet(view, message, buffers, shouldCommit, signal) {
     try {
       for (const target of targets) {
         if (target.parent !== void 0 && target.currentCanvas !== void 0) {
-          target.parent.replaceChild(
-            target.stagedCanvas,
-            target.currentCanvas
-          );
+          target.parent.replaceChild(target.stagedCanvas, target.currentCanvas);
         }
         committed.push(target);
       }
       for (const target of targets) {
-        view.canvases.set(
-          target.decoded.manifest.clip_id,
-          target.stagedCanvas
-        );
+        view.canvases.set(target.decoded.manifest.clip_id, target.stagedCanvas);
       }
       commitComparison();
     } catch (error) {
       for (const target of committed.reverse()) {
         if (target.parent !== void 0 && target.currentCanvas !== void 0 && target.stagedCanvas.parentNode === target.parent) {
-          target.parent.replaceChild(
-            target.currentCanvas,
-            target.stagedCanvas
-          );
+          target.parent.replaceChild(target.currentCanvas, target.stagedCanvas);
         }
         if (target.currentCanvas === void 0) {
           view.canvases.delete(target.decoded.manifest.clip_id);
         } else {
-          view.canvases.set(
-            target.decoded.manifest.clip_id,
-            target.currentCanvas
-          );
+          view.canvases.set(target.decoded.manifest.clip_id, target.currentCanvas);
         }
       }
       throw error;
@@ -1430,10 +1299,7 @@ var PlaybackClock = class {
     }
     const elapsed = timestampMicros(now) - this.anchorMicros;
     const elapsedFrames = elapsed <= 0n ? 0n : elapsed * this.fpsNum / (1000000n * this.fpsDen);
-    const desired = Math.max(
-      this.currentFrame,
-      this.anchorFrame + Number(elapsedFrames)
-    );
+    const desired = Math.max(this.currentFrame, this.anchorFrame + Number(elapsedFrames));
     if (desired >= this.numFrames - 1) {
       this.currentFrame = this.numFrames - 1;
       this.active = false;
@@ -1872,18 +1738,8 @@ function render({ model, el, signal }) {
         throw new ProtocolError("invalid_message", "Backend message has an unknown session.");
       }
       if (message.type === "frame_set" && (metadata === void 0 || playerView === void 0)) {
-        lastAcknowledgedRequestId = Math.max(
-          lastAcknowledgedRequestId,
-          message.request_id
-        );
-        model.send(
-          createFrameSetAck(
-            sessionId,
-            message.request_id,
-            message.generation,
-            "stale"
-          )
-        );
+        lastAcknowledgedRequestId = Math.max(lastAcknowledgedRequestId, message.request_id);
+        model.send(createFrameSetAck(sessionId, message.request_id, message.generation, "stale"));
         return;
       }
       if (message.type === "metadata") {
@@ -1949,11 +1805,7 @@ function render({ model, el, signal }) {
                 const previous = comparisonState;
                 let next;
                 try {
-                  next = transitionComparisonState(
-                    previous,
-                    metadata,
-                    transition
-                  );
+                  next = transitionComparisonState(previous, metadata, transition);
                 } catch (error) {
                   updateStatus(
                     error instanceof Error ? error.message : "Invalid comparison selection."
@@ -2024,9 +1876,7 @@ function render({ model, el, signal }) {
             sendPlaying: (playing) => model.send(createSetPlayingMessage(sessionId, playing))
           });
           autoplayPending = message.autoplay;
-          seekScheduler.requestExact(
-            Math.min(message.num_frames - 1, coordinator.currentFrame)
-          );
+          seekScheduler.requestExact(Math.min(message.num_frames - 1, coordinator.currentFrame));
           return;
         }
         status.textContent = "Kaleidoscope is ready.";
@@ -2054,32 +1904,20 @@ function render({ model, el, signal }) {
         const expected = currentRequest;
         const expectedClipIds = comparisonState?.activeClipIds ?? metadata.active_clip_ids;
         const manifestClipIds = message.frames.map((frame) => frame.clip_id);
-        const isCurrent = () => !signal.aborted && expected !== void 0 && requestsMatch(currentRequest, expected) && message.request_id === expected.request_id && message.generation === expected.generation && message.frame === expected.frame && manifestClipIds.length === expectedClipIds.length && manifestClipIds.every(
-          (clipId, index) => clipId === expectedClipIds[index]
-        );
+        const isCurrent = () => !signal.aborted && expected !== void 0 && requestsMatch(currentRequest, expected) && message.request_id === expected.request_id && message.generation === expected.generation && message.frame === expected.frame && manifestClipIds.length === expectedClipIds.length && manifestClipIds.every((clipId, index) => clipId === expectedClipIds[index]);
         const acknowledge = (outcome) => {
           if (acknowledged) {
             return;
           }
           acknowledged = true;
-          lastAcknowledgedRequestId = Math.max(
-            lastAcknowledgedRequestId,
-            message.request_id
-          );
+          lastAcknowledgedRequestId = Math.max(lastAcknowledgedRequestId, message.request_id);
           if (outcome !== "painted") {
             deliveryController.abort();
           }
           if (unacknowledgedDelivery?.requestId === message.request_id && unacknowledgedDelivery.generation === message.generation) {
             unacknowledgedDelivery = void 0;
           }
-          model.send(
-            createFrameSetAck(
-              sessionId,
-              message.request_id,
-              message.generation,
-              outcome
-            )
-          );
+          model.send(createFrameSetAck(sessionId, message.request_id, message.generation, outcome));
         };
         let acknowledged = false;
         const deliveryController = new AbortController();
@@ -2171,9 +2009,7 @@ function render({ model, el, signal }) {
         setCurrentRequest(void 0);
         playbackController?.pause(false);
       }
-      const clip = metadata?.clips.find(
-        (candidate) => candidate.id === message.clip_id
-      );
+      const clip = metadata?.clips.find((candidate) => candidate.id === message.clip_id);
       const errorStatus = clip === void 0 ? `Protocol error: ${message.message}` : `${clip.label}: ${message.message}`;
       if (!message.recoverable) {
         enterTerminal(errorStatus, false);

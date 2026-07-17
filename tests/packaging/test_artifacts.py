@@ -139,7 +139,9 @@ def assert_release_metadata(metadata: str) -> None:
     assert parsed_metadata["License-Expression"] == "MIT"
     assert parsed_metadata["License-File"] == "LICENSE"
     assert parsed_metadata["Description-Content-Type"] == "text/markdown"
-    requirements = {requirement.lower() for requirement in parsed_metadata.get_all("Requires-Dist", [])}
+    requirements = {
+        requirement.lower() for requirement in parsed_metadata.get_all("Requires-Dist", [])
+    }
     assert requirements == EXPECTED_REQUIREMENTS
     description = parsed_metadata.get_payload()
     assert not re.search(r"\[[^\]]+\]\((?!https?://|mailto:|#)[^)]+\)", description)
@@ -239,7 +241,8 @@ def test_frontend_assets_match_locked_source_build() -> None:
     environment = {
         key: value
         for key, value in os.environ.items()
-        if not key.lower().startswith("npm_config_") and key not in {"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH"}
+        if not key.lower().startswith("npm_config_")
+        and key not in {"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH"}
     }
     npm_cache = os.environ.get("KALEIDOSCOPE_NPM_CACHE")
     if npm_cache is not None:
@@ -264,7 +267,9 @@ def test_frontend_assets_match_locked_source_build() -> None:
             env=environment,
             check=True,
         )
-        installed_package = json.loads((toolchain / "node_modules/esbuild/package.json").read_text())
+        installed_package = json.loads(
+            (toolchain / "node_modules/esbuild/package.json").read_text()
+        )
         assert installed_package["version"] == locked_version
         executable = (toolchain / "node_modules/.bin/esbuild").resolve()
         assert executable.is_file() and executable.is_relative_to(toolchain)
@@ -373,7 +378,7 @@ def test_explicit_npm_cache_survives_private_runner_home(tmp_path: Path) -> None
             sys.executable,
             "-m",
             "pytest",
-            ("tests/packaging/test_artifacts.py::" "test_frontend_assets_match_locked_source_build"),
+            ("tests/packaging/test_artifacts.py::test_frontend_assets_match_locked_source_build"),
             "-q",
         ],
         cwd=ROOT,
@@ -625,7 +630,9 @@ def test_wheelhouse_preparation_preserves_previous_contents_on_failure(
     monkeypatch.setattr(
         preparation.subprocess,
         "run",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "pip download")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, "pip download")
+        ),
     )
 
     with pytest.raises(subprocess.CalledProcessError):
@@ -825,7 +832,9 @@ def test_artifact_smoke_scrubs_inherited_socket_and_proxy_endpoints(
     monkeypatch,
 ) -> None:
     smoke = load_artifact_smoke_module()
-    inherited = {variable: f"inherited-{variable}" for variable in smoke.SENSITIVE_ENVIRONMENT_VARIABLES}
+    inherited = {
+        variable: f"inherited-{variable}" for variable in smoke.SENSITIVE_ENVIRONMENT_VARIABLES
+    }
     inherited.update(
         {
             "ACTIONS_RUNTIME_TOKEN": "runtime-token",

@@ -47,9 +47,7 @@ def test_scheduler_submits_frame_set_members_fairly_within_the_bound() -> None:
             submission_failed=lambda error: (_ for _ in ()).throw(error),
         )
 
-    scheduler.replace_pending(
-        [frame("Source", source_future), frame("Filtered", filtered_future)]
-    )
+    scheduler.replace_pending([frame("Source", source_future), frame("Filtered", filtered_future)])
 
     assert submitted == ["Source"]
     assert scheduler.in_flight == 1
@@ -106,9 +104,7 @@ def test_scheduler_rotates_latest_sets_after_the_last_submitted_clip() -> None:
             submission_failed=lambda error: (_ for _ in ()).throw(error),
         )
 
-    scheduler.replace_pending(
-        [frame("Source", old_source), frame("Filtered", Future())]
-    )
+    scheduler.replace_pending([frame("Source", old_source), frame("Filtered", Future())])
     scheduler.replace_pending(
         [
             frame("Source", newest_source),

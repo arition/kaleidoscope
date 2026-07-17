@@ -68,16 +68,9 @@ export interface MetadataMessage {
 
 export type ClipId = number | string;
 
-export type ComparisonMode =
-  | "single"
-  | "side-by-side"
-  | "wipe"
-  | "overlay"
-  | "difference";
+export type ComparisonMode = "single" | "side-by-side" | "wipe" | "overlay" | "difference";
 
-export type ClipWarningCode =
-  | "automatic_rgb24_conversion"
-  | "assumed_color_metadata";
+export type ClipWarningCode = "automatic_rgb24_conversion" | "assumed_color_metadata";
 
 export interface ClipWarning {
   code: ClipWarningCode;
@@ -222,18 +215,13 @@ function isBackendErrorCode(value: unknown): value is BackendErrorCode {
 function isRuntimeClipErrorCode(
   value: BackendErrorCode,
 ): value is "render_failed" | "conversion_failed" | "encode_failed" {
-  return (
-    value === "render_failed" ||
-    value === "conversion_failed" ||
-    value === "encode_failed"
-  );
+  return value === "render_failed" || value === "conversion_failed" || value === "encode_failed";
 }
 
 function isClipWarning(value: unknown): value is ClipWarning {
   return (
     isRecord(value) &&
-    (value.code === "automatic_rgb24_conversion" ||
-      value.code === "assumed_color_metadata") &&
+    (value.code === "automatic_rgb24_conversion" || value.code === "assumed_color_metadata") &&
     typeof value.message === "string" &&
     value.message.length > 0
   );
@@ -291,10 +279,7 @@ function isFrameSetMessage(
 
   const bufferIndices = frames.map((frame) => frame.buffer_index);
   const clipIds = frames.map((frame) => frame.clip_id);
-  const totalBytes = frames.reduce(
-    (total, frame) => total + frame.byte_length,
-    0,
-  );
+  const totalBytes = frames.reduce((total, frame) => total + frame.byte_length, 0);
   return (
     new Set(bufferIndices).size === bufferIndices.length &&
     bufferIndices.every((bufferIndex, index) => bufferIndex === index) &&
@@ -343,15 +328,11 @@ function isPreviewMetadataMessage(
   const clips = value.clips as ClipMetadata[];
   const clipIds = clips.map((clip) => clip.id);
   const activeIds = value.active_clip_ids;
-  const activeClips = activeIds.map((activeId) =>
-    clips.find((clip) => clip.id === activeId),
-  );
+  const activeClips = activeIds.map((activeId) => clips.find((clip) => clip.id === activeId));
   const validCardinality =
     (value.mode === "single" && activeIds.length === 1) ||
     (value.mode === "side-by-side" && activeIds.length >= 1) ||
-    ((value.mode === "wipe" ||
-      value.mode === "overlay" ||
-      value.mode === "difference") &&
+    ((value.mode === "wipe" || value.mode === "overlay" || value.mode === "difference") &&
       activeIds.length === 2);
   const validAlignedGeometry =
     value.mode === "single" ||
@@ -445,10 +426,7 @@ export function createSetViewMessage(
   };
 }
 
-export function createSetPlayingMessage(
-  sessionId: string,
-  playing: boolean,
-): SetPlayingMessage {
+export function createSetPlayingMessage(sessionId: string, playing: boolean): SetPlayingMessage {
   return {
     protocol: PROTOCOL_VERSION,
     type: "set_playing",
@@ -457,15 +435,9 @@ export function createSetPlayingMessage(
   };
 }
 
-export function validateFrameSetBuffers(
-  message: FrameSetMessage,
-  buffers: DataView[],
-): void {
+export function validateFrameSetBuffers(message: FrameSetMessage, buffers: DataView[]): void {
   if (buffers.length !== message.frames.length) {
-    throw new ProtocolError(
-      "invalid_message",
-      "Frame payload count does not match its manifest.",
-    );
+    throw new ProtocolError("invalid_message", "Frame payload count does not match its manifest.");
   }
   for (const frame of message.frames) {
     const buffer = buffers[frame.buffer_index];
@@ -521,18 +493,14 @@ export function parseBackendMessage(value: unknown): BackendMessage {
     typeof value.message === "string" &&
     typeof value.recoverable === "boolean"
   ) {
-    const hasRequestContext =
-      "request_id" in value || "generation" in value || "clip_id" in value;
+    const hasRequestContext = "request_id" in value || "generation" in value || "clip_id" in value;
     if (
       hasRequestContext &&
       (!isNonnegativeInteger(value.request_id) ||
         !isNonnegativeInteger(value.generation) ||
         !isClipId(value.clip_id))
     ) {
-      throw new ProtocolError(
-        "invalid_message",
-        "Malformed backend error context.",
-      );
+      throw new ProtocolError("invalid_message", "Malformed backend error context.");
     }
     const runtimeClipError = isRuntimeClipErrorCode(value.code);
     if (

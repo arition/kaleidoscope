@@ -1,8 +1,5 @@
 import { createFrameSetRequest } from "./protocol.js";
-import type {
-  ClipId,
-  RequestFrameSetMessage,
-} from "./protocol.js";
+import type { ClipId, RequestFrameSetMessage } from "./protocol.js";
 
 interface PlaybackClockOptions {
   numFrames: number;
@@ -15,8 +12,7 @@ export interface PlaybackSample {
   ended: boolean;
 }
 
-const timestampMicros = (milliseconds: number): bigint =>
-  BigInt(Math.trunc(milliseconds * 1000));
+const timestampMicros = (milliseconds: number): bigint => BigInt(Math.trunc(milliseconds * 1000));
 
 export class PlaybackClock {
   private readonly numFrames: number;
@@ -63,14 +59,8 @@ export class PlaybackClock {
       return { frame: this.currentFrame, ended: false };
     }
     const elapsed = timestampMicros(now) - this.anchorMicros;
-    const elapsedFrames =
-      elapsed <= 0n
-        ? 0n
-        : (elapsed * this.fpsNum) / (1_000_000n * this.fpsDen);
-    const desired = Math.max(
-      this.currentFrame,
-      this.anchorFrame + Number(elapsedFrames),
-    );
+    const elapsedFrames = elapsed <= 0n ? 0n : (elapsed * this.fpsNum) / (1_000_000n * this.fpsDen);
+    const desired = Math.max(this.currentFrame, this.anchorFrame + Number(elapsedFrames));
     if (desired >= this.numFrames - 1) {
       this.currentFrame = this.numFrames - 1;
       this.active = false;
@@ -325,9 +315,7 @@ export class PausedSeekScheduler {
 
   requestPlayback(frame: number, restart = false): FrameRequestIdentity {
     this.cancelScheduledScrub();
-    const generation = restart
-      ? this.sequence.advanceGeneration()
-      : this.sequence.generation;
+    const generation = restart ? this.sequence.advanceGeneration() : this.sequence.generation;
     return this.sendRequest(frame, generation, "playback");
   }
 

@@ -153,9 +153,7 @@ async function runFixture(
       frame: iteration,
     };
     const commStarted = performance.now();
-    const buffers = sourceBuffers.map(
-      (source) => new DataView(source.slice().buffer),
-    );
+    const buffers = sourceBuffers.map((source) => new DataView(source.slice().buffer));
     const commEnded = performance.now();
 
     const protocolStarted = performance.now();
@@ -181,12 +179,7 @@ async function runFixture(
       if (context === null) {
         throw new Error("The committed benchmark canvas is unavailable.");
       }
-      context.getImageData(
-        Math.floor(canvas.width / 2),
-        Math.floor(canvas.height / 2),
-        1,
-        1,
-      );
+      context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1);
     }
     const flushEnded = performance.now();
     const decodeStart = Math.min(...decodeIntervals.map((item) => item.start));
@@ -200,8 +193,7 @@ async function runFixture(
       decode_barrier_ms: decodeBarrierMs,
       paint_non_decode_ms: Math.max(0, paintTotalMs - decodeBarrierMs),
       canvas_flush_ms: flushEnded - flushStarted,
-      simulated_receive_to_paint_ms:
-        flushEnded - commStarted,
+      simulated_receive_to_paint_ms: flushEnded - commStarted,
     };
   };
 

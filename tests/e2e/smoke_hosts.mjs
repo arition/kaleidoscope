@@ -3,9 +3,7 @@ import { chromium } from "@playwright/test";
 const [, , host, hostVersion, baseUrl, notebook] = process.argv;
 const token = process.env.KALEIDOSCOPE_JUPYTER_TOKEN;
 if (!host || !hostVersion || !baseUrl || !token || !notebook) {
-  throw new Error(
-    "Expected host, host version, base URL, notebook, and runtime token.",
-  );
+  throw new Error("Expected host, host version, base URL, notebook, and runtime token.");
 }
 
 const redact = (value) => value.split(token).join("<redacted>");
@@ -41,10 +39,7 @@ try {
     .getByRole("button")
     .click();
 
-  await page
-    .getByRole("status")
-    .filter({ hasText: "Frame 0 ready." })
-    .waitFor({ timeout: 60_000 });
+  await page.getByRole("status").filter({ hasText: "Frame 0 ready." }).waitFor({ timeout: 60_000 });
   const pixel = await page.locator(".kaleidoscope-canvas").evaluate((element) => {
     const context = element.getContext("2d");
     if (context === null) {
@@ -68,10 +63,18 @@ try {
   }
 } catch (error) {
   const cellText = page
-    ? await page.locator(".jp-CodeCell").first().innerText().catch(() => "<missing>")
+    ? await page
+        .locator(".jp-CodeCell")
+        .first()
+        .innerText()
+        .catch(() => "<missing>")
     : "<page unavailable>";
   const outputText = page
-    ? await page.locator(".jp-Cell-outputArea").first().innerText().catch(() => "<missing>")
+    ? await page
+        .locator(".jp-Cell-outputArea")
+        .first()
+        .innerText()
+        .catch(() => "<missing>")
     : "<page unavailable>";
   const diagnostic = `${String(error)}\nURL: ${page?.url() ?? "<page unavailable>"}\nCell: ${cellText}\nOutput: ${outputText}`;
   throw new Error(redact(diagnostic).slice(0, 32_000));

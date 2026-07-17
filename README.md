@@ -100,6 +100,7 @@ preview(
 
 ```bash
 npm ci
+npm run check
 npm test -- --run
 npm run build
 release_dir=dist/release-candidate
@@ -112,6 +113,8 @@ KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
     "$release_guard" sh -eu -c \
       '.venv/bin/hatch run test:pytest && .venv/bin/hatch run test:artifact-smoke'
 ```
+
+Run `npm run fmt` to apply Oxfmt to frontend sources and configuration.
 
 Frontend assets are committed into `src/kaleidoscope/static` so wheels and
 source distributions install without Node.js or a runtime network request.

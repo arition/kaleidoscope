@@ -37,11 +37,7 @@ try {
     const before = metricsByName((await cdp.send("Performance.getMetrics")).metrics);
     const result = await page.evaluate(
       async ({ currentFixture, currentWarmup, currentSamples }) =>
-        window.runKaleidoscopeBrowserBenchmark(
-          currentFixture,
-          currentWarmup,
-          currentSamples,
-        ),
+        window.runKaleidoscopeBrowserBenchmark(currentFixture, currentWarmup, currentSamples),
       {
         currentFixture: fixture,
         currentWarmup: warmup,
@@ -52,8 +48,7 @@ try {
     const after = metricsByName((await cdp.send("Performance.getMetrics")).metrics);
     result.cdp = {
       task_duration_ms: ((after.TaskDuration ?? 0) - (before.TaskDuration ?? 0)) * 1000,
-      script_duration_ms:
-        ((after.ScriptDuration ?? 0) - (before.ScriptDuration ?? 0)) * 1000,
+      script_duration_ms: ((after.ScriptDuration ?? 0) - (before.ScriptDuration ?? 0)) * 1000,
       js_heap_used_before_bytes: before.JSHeapUsedSize ?? null,
       js_heap_used_after_bytes: after.JSHeapUsedSize ?? null,
     };

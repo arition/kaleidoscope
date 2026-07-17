@@ -5,6 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "npm run typecheck && esbuild frontend/index.ts --bundle --format=esm --target=es2022 --outfile=src/kaleidoscope/static/index.js && esbuild frontend/styles.css --bundle --outfile=src/kaleidoscope/static/index.css",
+    "check": "npm run lint && npm run fmt:check && npm run typecheck",
+    "fmt": "oxfmt frontend tests/frontend tests/e2e benchmarks/browser.ts benchmarks/run_browser.mjs playwright.config.ts vitest.config.ts package.json tsconfig.json .oxlintrc.json .oxfmtrc.json",
+    "fmt:check": "npm run fmt -- --check",
+    "lint": "oxlint frontend tests/frontend tests/e2e benchmarks playwright.config.ts vitest.config.ts",
+    "lint:fix": "npm run lint -- --fix",
     "test": "vitest",
     "test:coverage": "vitest --run --coverage",
     "test:e2e": "npm run build && PATH=\"$PWD/.venv/bin:$PATH\" hatch run test:e2e-fixture && playwright test",
@@ -17,7 +22,13 @@
     "@vitest/coverage-v8": "3.2.7",
     "esbuild": "0.28.1",
     "jsdom": "26.1.0",
+    "oxfmt": "0.59.0",
+    "oxlint": "1.74.0",
+    "oxlint-tsgolint": "0.25.0",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

@@ -54,9 +54,7 @@ def smoke_player(clips: object, mode: str, clip_ids: list[str | int]) -> None:
         )
         assert delivered.wait(10), sent
         metadata = next(content for content, _ in sent if content["type"] == "metadata")
-        frame_set, buffers = next(
-            item for item in sent if item[0]["type"] == "frame_set"
-        )
+        frame_set, buffers = next(item for item in sent if item[0]["type"] == "frame_set")
         assert metadata["mode"] == mode
         assert frame_set["frame"] == 0
         assert buffers is not None and len(buffers) == len(clip_ids)

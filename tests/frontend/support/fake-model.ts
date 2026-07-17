@@ -8,17 +8,12 @@ export class FakeModel implements AnyModel {
   readonly order: string[] = [];
   readonly sent: unknown[] = [];
   readonly widget_manager = {
-    async get_model<T extends Record<string, unknown>>(
-      _modelId: string,
-    ): Promise<AnyModel<T>> {
+    async get_model<T extends Record<string, unknown>>(_modelId: string): Promise<AnyModel<T>> {
       throw new Error("No child widgets are available in this test.");
     },
   };
   private readonly messageHandlers = new Set<MessageHandler>();
-  private readonly changeHandlers = new Map<
-    string,
-    Set<(...args: any[]) => void>
-  >();
+  private readonly changeHandlers = new Map<string, Set<(...args: any[]) => void>>();
 
   constructor(private readonly sessionId = "session-1") {}
 
@@ -51,10 +46,7 @@ export class FakeModel implements AnyModel {
     }
   }
 
-  off(
-    eventName?: string | null,
-    callback?: ((...args: any[]) => void) | null,
-  ): void {
+  off(eventName?: string | null, callback?: ((...args: any[]) => void) | null): void {
     if (eventName === undefined || eventName === null) {
       return;
     }
@@ -77,11 +69,7 @@ export class FakeModel implements AnyModel {
 
   save_changes(): void {}
 
-  send(
-    message: unknown,
-    _callbacks?: unknown,
-    _buffers?: ArrayBuffer[] | ArrayBufferView[],
-  ): void {
+  send(message: unknown, _callbacks?: unknown, _buffers?: ArrayBuffer[] | ArrayBufferView[]): void {
     this.order.push("send:ready");
     this.sent.push(message);
   }

@@ -4,28 +4,15 @@ const sessionId = "browser-session";
 const widgetManager = {};
 const messages = [];
 let messageHandler;
-const showConversionWarning = new URLSearchParams(window.location.search).has(
-  "conversion",
-);
-const showSideBySide = new URLSearchParams(window.location.search).has(
-  "side-by-side",
-);
-const testComparison = new URLSearchParams(window.location.search).has(
-  "comparison",
-);
+const showConversionWarning = new URLSearchParams(window.location.search).has("conversion");
+const showSideBySide = new URLSearchParams(window.location.search).has("side-by-side");
+const testComparison = new URLSearchParams(window.location.search).has("comparison");
 const showWebp = new URLSearchParams(window.location.search).get("codec") === "webp";
-const testRapidSeek = new URLSearchParams(window.location.search).has(
-  "rapid-seek",
-);
-const testPlayback = new URLSearchParams(window.location.search).has(
-  "playback",
-);
-const testSlowPlayback = new URLSearchParams(window.location.search).has(
-  "slow-playback",
-);
+const testRapidSeek = new URLSearchParams(window.location.search).has("rapid-seek");
+const testPlayback = new URLSearchParams(window.location.search).has("playback");
+const testSlowPlayback = new URLSearchParams(window.location.search).has("slow-playback");
 const clipId = showConversionWarning ? "Filtered" : "Source";
-let activeClipIds =
-  showSideBySide || testComparison ? ["Source", "Filtered"] : [clipId];
+let activeClipIds = showSideBySide || testComparison ? ["Source", "Filtered"] : [clipId];
 
 const clip = (id, sourceFormat = "RGB24", warnings = []) => ({
   id,
@@ -74,28 +61,29 @@ const model = {
           overlay_opacity: 0.5,
           max_visible_clips: testComparison ? 2 : 4,
           autoplay: false,
-          clips: showSideBySide || testComparison
-            ? [clip("Source"), clip("Filtered"), ...(testComparison ? [clip("Reference")] : [])]
-            : [
-                clip(
-                  clipId,
-                  showConversionWarning ? "YUV420P8" : "RGB24",
-                  showConversionWarning
-                    ? [
-                        {
-                          code: "automatic_rgb24_conversion",
-                          message:
-                            "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
-                        },
-                        {
-                          code: "assumed_color_metadata",
-                          message:
-                            "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
-                        },
-                      ]
-                    : [],
-                ),
-              ],
+          clips:
+            showSideBySide || testComparison
+              ? [clip("Source"), clip("Filtered"), ...(testComparison ? [clip("Reference")] : [])]
+              : [
+                  clip(
+                    clipId,
+                    showConversionWarning ? "YUV420P8" : "RGB24",
+                    showConversionWarning
+                      ? [
+                          {
+                            code: "automatic_rgb24_conversion",
+                            message:
+                              "YUV420P8 is being converted automatically for preview; convert to RGB24 explicitly upstream for controlled color handling.",
+                          },
+                          {
+                            code: "assumed_color_metadata",
+                            message:
+                              "Source color metadata is incomplete; preview assumes matrix BT.709, transfer BT.709, and range limited.",
+                          },
+                        ]
+                      : [],
+                  ),
+                ],
         });
       });
       return;
@@ -110,12 +98,12 @@ const model = {
         showConversionWarning
           ? "frame.jpg"
           : id === "Source"
-          ? showWebp
-            ? "frame.webp"
-            : "frame.jpg"
-          : id === "Filtered"
-            ? "filtered.jpg"
-            : "reference.jpg",
+            ? showWebp
+              ? "frame.webp"
+              : "frame.jpg"
+            : id === "Filtered"
+              ? "filtered.jpg"
+              : "reference.jpg",
       );
       const responseDelay =
         testRapidSeek && message.frame === 2
@@ -124,9 +112,7 @@ const model = {
             ? 800
             : 0;
       void Promise.all(
-        fixtureNames.map((name) =>
-          fetch(`./${name}`).then((response) => response.arrayBuffer()),
-        ),
+        fixtureNames.map((name) => fetch(`./${name}`).then((response) => response.arrayBuffer())),
       ).then((buffers) => {
         setTimeout(() => {
           emit(
@@ -137,19 +123,19 @@ const model = {
               request_id: message.request_id,
               generation: message.generation,
               frame: message.frame,
-                frames: responseClipIds.map((activeClipId, bufferIndex) => ({
-                  clip_id: activeClipId,
-                  buffer_index: bufferIndex,
-                  mime: showWebp ? "image/webp" : "image/jpeg",
-                  byte_length: buffers[bufferIndex].byteLength,
-                  render_ms: 0,
-                  encode_ms: 0,
-                })),
+              frames: responseClipIds.map((activeClipId, bufferIndex) => ({
+                clip_id: activeClipId,
+                buffer_index: bufferIndex,
+                mime: showWebp ? "image/webp" : "image/jpeg",
+                byte_length: buffers[bufferIndex].byteLength,
+                render_ms: 0,
+                encode_ms: 0,
+              })),
             },
             buffers.map((buffer) => new DataView(buffer)),
           );
         }, responseDelay);
-        });
+      });
     }
   },
 };

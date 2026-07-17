@@ -3,10 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "../../frontend/index.js";
 import { paintFrameSet } from "../../frontend/player.js";
 import type { PlayerView } from "../../frontend/player.js";
-import type {
-  FrameSetMessage,
-  PreviewMetadataMessage,
-} from "../../frontend/protocol.js";
+import type { FrameSetMessage, PreviewMetadataMessage } from "../../frontend/protocol.js";
 import { FakeModel } from "./support/fake-model.js";
 
 const metadata: PreviewMetadataMessage = {
@@ -143,10 +140,7 @@ function createView(drawImage: ReturnType<typeof vi.fn>): PlayerView {
 }
 
 function payloads(): DataView[] {
-  return [
-    new DataView(new Uint8Array([1]).buffer),
-    new DataView(new Uint8Array([2]).buffer),
-  ];
+  return [new DataView(new Uint8Array([1]).buffer), new DataView(new Uint8Array([2]).buffer)];
 }
 
 async function setupInteractiveComparison(): Promise<{
@@ -197,9 +191,7 @@ describe("atomic comparison painting", () => {
     const initialClose = vi.fn();
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: initialClose } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: initialClose } as unknown as ImageBitmap),
     );
 
     await paintFrameSet(view, frameSet(0), payloads(), () => true);
@@ -220,12 +212,7 @@ describe("atomic comparison painting", () => {
         .mockReturnValueOnce(slowDecode),
     );
 
-    const replacement = paintFrameSet(
-      view,
-      frameSet(1),
-      payloads(),
-      () => true,
-    );
+    const replacement = paintFrameSet(view, frameSet(1), payloads(), () => true);
     await Promise.resolve();
     expect(drawImage).toHaveBeenCalledTimes(2);
 
@@ -246,9 +233,9 @@ describe("atomic comparison painting", () => {
         .mockRejectedValueOnce(new Error("decode failed")),
     );
 
-    await expect(
-      paintFrameSet(view, frameSet(0), payloads(), () => true),
-    ).rejects.toThrow("decode failed");
+    await expect(paintFrameSet(view, frameSet(0), payloads(), () => true)).rejects.toThrow(
+      "decode failed",
+    );
     expect(drawImage).not.toHaveBeenCalled();
     expect(decodedClose).toHaveBeenCalledOnce();
   });
@@ -265,14 +252,12 @@ describe("atomic comparison painting", () => {
     const filtered = view.canvases.get("Filtered");
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
-    await expect(
-      paintFrameSet(view, frameSet(0), payloads(), () => true),
-    ).rejects.toThrow("draw failed");
+    await expect(paintFrameSet(view, frameSet(0), payloads(), () => true)).rejects.toThrow(
+      "draw failed",
+    );
 
     expect(view.canvases.get("Source")).toBe(source);
     expect(view.canvases.get("Filtered")).toBe(filtered);
@@ -289,14 +274,12 @@ describe("atomic comparison painting", () => {
     };
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
-    await expect(
-      paintFrameSet(view, frameSet(0), payloads(), () => true),
-    ).rejects.toThrow("composition failed");
+    await expect(paintFrameSet(view, frameSet(0), payloads(), () => true)).rejects.toThrow(
+      "composition failed",
+    );
 
     expect(view.canvases.get("Source")).toBe(source);
     expect(view.canvases.get("Filtered")).toBe(filtered);
@@ -328,9 +311,7 @@ describe("atomic comparison painting", () => {
     model.emit(frameSet(0), payloads());
 
     await vi.waitFor(() => expect(drawImage).toHaveBeenCalledTimes(2));
-    expect(element.querySelector("[role='status']")?.textContent).toBe(
-      "Frame 0 ready.",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 0 ready.");
     expect(model.sent).toContainEqual({
       protocol: 1,
       type: "ack_frame_set",
@@ -349,9 +330,7 @@ describe("atomic comparison painting", () => {
     expect(createImageBitmap).toHaveBeenCalledTimes(2);
     expect(drawImage).toHaveBeenCalledTimes(2);
     expect(close).toHaveBeenCalledTimes(2);
-    expect(element.querySelector("[role='status']")?.textContent).toBe(
-      "Frame 0 ready.",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 0 ready.");
   });
 
   it("ignores a duplicate delivery after acknowledging its identity", async () => {
@@ -362,9 +341,7 @@ describe("atomic comparison painting", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
     const model = new FakeModel();
@@ -428,9 +405,7 @@ describe("atomic comparison painting", () => {
     createImageBitmap.mockClear();
     model.emit(metadata);
 
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     expect(seek).not.toBeNull();
     if (seek !== null) {
       seek.value = "1";
@@ -495,9 +470,7 @@ describe("atomic comparison painting", () => {
     model.emit(metadata);
     model.emit(frameSet(0), payloads());
 
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
     expect(frame).not.toBeNull();
     if (frame !== null) {
       frame.value = "1";
@@ -517,16 +490,12 @@ describe("atomic comparison painting", () => {
     model.emit({ ...frameSet(1), generation: 1 }, payloads());
 
     await vi.waitFor(() =>
-      expect(element.querySelector("[role='status']")?.textContent).toBe(
-        "Frame 1 ready.",
-      ),
+      expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 1 ready."),
     );
     rejectStaleDecode(new Error("stale decode failed"));
     await vi.waitFor(() => expect(staleClose).toHaveBeenCalledOnce());
 
-    expect(element.querySelector("[role='status']")?.textContent).toBe(
-      "Frame 1 ready.",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 1 ready.");
     expect(
       model.sent.filter(
         (message) =>
@@ -572,9 +541,7 @@ describe("atomic comparison painting", () => {
     model.emit(metadata);
     model.emit(frameSet(0), payloads());
 
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
     if (frame === null) {
       throw new Error("Missing frame input.");
     }
@@ -583,10 +550,7 @@ describe("atomic comparison painting", () => {
     model.emit({ ...frameSet(1), generation: 1 }, payloads());
     frame.value = "0";
     frame.dispatchEvent(new Event("change", { bubbles: true }));
-    model.emit(
-      { ...frameSet(0), request_id: 2, generation: 2 },
-      payloads(),
-    );
+    model.emit({ ...frameSet(0), request_id: 2, generation: 2 }, payloads());
 
     expect(createImageBitmap).toHaveBeenCalledTimes(4);
     expect(model.sent).toContainEqual({
@@ -610,7 +574,10 @@ describe("atomic comparison painting", () => {
   });
 
   it("preserves deferred playback resume across a newer comparison change", async () => {
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 41));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 41),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       clearRect: vi.fn(),
@@ -648,9 +615,7 @@ describe("atomic comparison painting", () => {
     model.emit(interactiveMetadata);
     model.emit(frameSet(0), payloads());
 
-    const frame = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Current frame']",
-    );
+    const frame = element.querySelector<HTMLInputElement>("input[aria-label='Current frame']");
     if (frame === null) {
       throw new Error("Missing frame input.");
     }
@@ -658,21 +623,15 @@ describe("atomic comparison painting", () => {
     frame.dispatchEvent(new Event("change", { bubbles: true }));
     model.emit({ ...frameSet(1), generation: 1 }, payloads());
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Single view']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Single view']")?.click();
     model.emit(selectedFrameSet(2, 2, 0, ["Source"]), payloads().slice(0, 1));
 
-    const solo = element.querySelector<HTMLSelectElement>(
-      "select[aria-label='Solo clip']",
-    );
+    const solo = element.querySelector<HTMLSelectElement>("select[aria-label='Solo clip']");
     if (solo === null) {
       throw new Error("Missing solo selector.");
     }
     solo.value =
-      Array.from(solo.options).find(
-        (option) => option.textContent === "Reference",
-      )?.value ?? "";
+      Array.from(solo.options).find((option) => option.textContent === "Reference")?.value ?? "";
     solo.dispatchEvent(new Event("change", { bubbles: true }));
 
     const firstClose = vi.fn();
@@ -689,10 +648,7 @@ describe("atomic comparison painting", () => {
       generation: 3,
       clip_ids: ["Reference"],
     });
-    model.emit(
-      selectedFrameSet(3, 3, 0, ["Reference"]),
-      payloads().slice(0, 1),
-    );
+    model.emit(selectedFrameSet(3, 3, 0, ["Reference"]), payloads().slice(0, 1));
 
     await vi.waitFor(() =>
       expect(
@@ -703,11 +659,7 @@ describe("atomic comparison painting", () => {
             "type" in message &&
             message.type === "set_playing",
         ),
-      ).toMatchObject([
-        { playing: true },
-        { playing: false },
-        { playing: true },
-      ]),
+      ).toMatchObject([{ playing: true }, { playing: false }, { playing: true }]),
     );
   });
 
@@ -760,14 +712,9 @@ describe("atomic comparison painting", () => {
         expect.objectContaining({ type: "ack_frame_set", outcome: "painted" }),
       ),
     );
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn().mockRejectedValue(new Error("decode failed")),
-    );
+    vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new Error("decode failed")));
 
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Single view']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Single view']")?.click();
     model.emit(selectedFrameSet(1, 1, 0, ["Source"]), payloads().slice(0, 1));
     await vi.waitFor(() =>
       expect(model.sent).toContainEqual(
@@ -779,18 +726,12 @@ describe("atomic comparison painting", () => {
       ),
     );
 
-    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe(
-      "side-by-side",
-    );
+    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe("side-by-side");
     expect(
-      element
-        .querySelector("button[aria-label='Single view']")
-        ?.getAttribute("aria-pressed"),
+      element.querySelector("button[aria-label='Single view']")?.getAttribute("aria-pressed"),
     ).toBe("true");
 
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Single view']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Single view']")?.click();
     expect(frameRequests(model)).toHaveLength(3);
     expect(frameRequests(model).at(-1)).toMatchObject({
       clip_ids: ["Source"],
@@ -805,9 +746,7 @@ describe("atomic comparison painting", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
     const model = new FakeModel();
@@ -843,9 +782,7 @@ describe("atomic comparison painting", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
     const model = new FakeModel();
@@ -884,9 +821,7 @@ describe("atomic comparison painting", () => {
     );
     expect(drawImage).toHaveBeenCalledTimes(2);
 
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }
@@ -903,9 +838,7 @@ describe("atomic comparison painting", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.stubGlobal(
       "createImageBitmap",
-      vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
+      vi.fn().mockResolvedValue({ close: vi.fn() } as unknown as ImageBitmap),
     );
 
     const model = new FakeModel();
@@ -927,9 +860,7 @@ describe("atomic comparison painting", () => {
       recoverable: true,
     });
 
-    expect(element.querySelector("[role='status']")?.textContent).toBe(
-      "Frame 0 ready.",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 0 ready.");
     expect(drawImage).toHaveBeenCalledTimes(2);
   });
 
@@ -937,25 +868,17 @@ describe("atomic comparison painting", () => {
     const { element, model } = await setupInteractiveComparison();
 
     element.querySelector<HTMLButtonElement>("button[aria-label='Wipe view']")?.click();
-    const wipe = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Wipe position']",
-    );
+    const wipe = element.querySelector<HTMLInputElement>("input[aria-label='Wipe position']");
     expect(wipe?.type).toBe("range");
     expect(wipe?.min).toBe("0");
     expect(wipe?.max).toBe("100");
 
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Overlay view']")
-      ?.click();
-    const opacity = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Overlay opacity']",
-    );
+    element.querySelector<HTMLButtonElement>("button[aria-label='Overlay view']")?.click();
+    const opacity = element.querySelector<HTMLInputElement>("input[aria-label='Overlay opacity']");
     expect(opacity?.min).toBe("0");
     expect(opacity?.max).toBe("1");
 
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Difference view']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Difference view']")?.click();
     expect(element.textContent).toContain("8-bit visual difference (non-reference)");
     expect(frameRequests(model)).toHaveLength(1);
     expect(model.sent).toEqual(
@@ -985,19 +908,12 @@ describe("atomic comparison painting", () => {
   it("announces the aligned clips, mode, frame, and time", async () => {
     const { element, model } = await setupInteractiveComparison();
     element.querySelector<HTMLButtonElement>("button[aria-label='Wipe view']")?.click();
-    model.emit(
-      selectedFrameSet(1, 1, 0, ["Source", "Filtered"]),
-      payloads(),
-    );
+    model.emit(selectedFrameSet(1, 1, 0, ["Source", "Filtered"]), payloads());
 
     await vi.waitFor(() =>
       expect(
-        element
-          .querySelector(".kaleidoscope-comparison__canvas")
-          ?.getAttribute("aria-label"),
-      ).toBe(
-        "Source and Filtered, wipe comparison, frame 0, time 00:00:00.000",
-      ),
+        element.querySelector(".kaleidoscope-comparison__canvas")?.getAttribute("aria-label"),
+      ).toBe("Source and Filtered, wipe comparison, frame 0, time 00:00:00.000"),
     );
   });
 
@@ -1011,9 +927,8 @@ describe("atomic comparison painting", () => {
     expect(secondary).not.toBeNull();
     if (secondary !== null) {
       secondary.value =
-        Array.from(secondary.options).find(
-          (option) => option.textContent === "Reference",
-        )?.value ?? "";
+        Array.from(secondary.options).find((option) => option.textContent === "Reference")?.value ??
+        "";
       secondary.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
@@ -1049,9 +964,9 @@ describe("atomic comparison painting", () => {
       frame: 0,
       clip_ids: ["Source", "Reference"],
     });
-    expect(
-      element.querySelector("[data-clip-id='Reference']")?.getAttribute("data-active"),
-    ).toBe("false");
+    expect(element.querySelector("[data-clip-id='Reference']")?.getAttribute("data-active")).toBe(
+      "false",
+    );
   });
 
   it("keeps the committed active rows visible until a new active set paints", async () => {
@@ -1063,49 +978,38 @@ describe("atomic comparison painting", () => {
       ),
     );
 
-    const sourceCanvas = element.querySelector(
-      "[data-clip-id='Source'] .kaleidoscope-canvas",
-    );
-    const filteredCanvas = element.querySelector(
-      "[data-clip-id='Filtered'] .kaleidoscope-canvas",
-    );
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Single view']")
-      ?.click();
+    const sourceCanvas = element.querySelector("[data-clip-id='Source'] .kaleidoscope-canvas");
+    const filteredCanvas = element.querySelector("[data-clip-id='Filtered'] .kaleidoscope-canvas");
+    element.querySelector<HTMLButtonElement>("button[aria-label='Single view']")?.click();
 
-    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe(
-      "side-by-side",
+    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe("side-by-side");
+    expect(element.querySelector("[data-clip-id='Source']")?.getAttribute("data-active")).toBe(
+      "true",
     );
-    expect(
-      element.querySelector("[data-clip-id='Source']")?.getAttribute("data-active"),
-    ).toBe("true");
-    expect(
-      element
-        .querySelector("[data-clip-id='Filtered']")
-        ?.getAttribute("data-active"),
-    ).toBe("true");
-    expect(
-      element.querySelector("[data-clip-id='Source'] .kaleidoscope-canvas"),
-    ).toBe(sourceCanvas);
-    expect(
-      element.querySelector("[data-clip-id='Filtered'] .kaleidoscope-canvas"),
-    ).toBe(filteredCanvas);
+    expect(element.querySelector("[data-clip-id='Filtered']")?.getAttribute("data-active")).toBe(
+      "true",
+    );
+    expect(element.querySelector("[data-clip-id='Source'] .kaleidoscope-canvas")).toBe(
+      sourceCanvas,
+    );
+    expect(element.querySelector("[data-clip-id='Filtered'] .kaleidoscope-canvas")).toBe(
+      filteredCanvas,
+    );
 
     model.emit(selectedFrameSet(1, 1, 0, ["Source"]), payloads().slice(0, 1));
     await vi.waitFor(() =>
-      expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe(
-        "single",
-      ),
+      expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe("single"),
     );
-    expect(
-      element
-        .querySelector("[data-clip-id='Filtered']")
-        ?.getAttribute("data-active"),
-    ).toBe("false");
+    expect(element.querySelector("[data-clip-id='Filtered']")?.getAttribute("data-active")).toBe(
+      "false",
+    );
   });
 
   it("pauses and resumes playback around an active-set commit", async () => {
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 41));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 41),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { element, model } = await setupInteractiveComparison();
     model.emit(frameSet(0), payloads());
@@ -1116,9 +1020,7 @@ describe("atomic comparison painting", () => {
     );
 
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    element
-      .querySelector<HTMLButtonElement>("button[aria-label='Single view']")
-      ?.click();
+    element.querySelector<HTMLButtonElement>("button[aria-label='Single view']")?.click();
 
     expect(
       model.sent.filter(
@@ -1135,15 +1037,11 @@ describe("atomic comparison painting", () => {
       frame: 0,
       clip_ids: ["Source"],
     });
-    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe(
-      "side-by-side",
-    );
+    expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe("side-by-side");
 
     model.emit(selectedFrameSet(1, 1, 0, ["Source"]), payloads().slice(0, 1));
     await vi.waitFor(() =>
-      expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe(
-        "single",
-      ),
+      expect(element.querySelector(".kaleidoscope-mode")?.textContent).toBe("single"),
     );
     expect(
       model.sent.filter(
@@ -1153,11 +1051,7 @@ describe("atomic comparison painting", () => {
           "type" in message &&
           message.type === "set_playing",
       ),
-    ).toMatchObject([
-      { playing: true },
-      { playing: false },
-      { playing: true },
-    ]);
+    ).toMatchObject([{ playing: true }, { playing: false }, { playing: true }]);
   });
 
   it("retains the last complete composition until a changed pair commits", async () => {
@@ -1170,9 +1064,7 @@ describe("atomic comparison painting", () => {
     );
     element.querySelector<HTMLButtonElement>("button[aria-label='Wipe view']")?.click();
 
-    const complete = element.querySelector<HTMLCanvasElement>(
-      ".kaleidoscope-comparison__canvas",
-    );
+    const complete = element.querySelector<HTMLCanvasElement>(".kaleidoscope-comparison__canvas");
     expect(complete?.getAttribute("aria-label")).toContain("Filtered");
 
     const secondary = element.querySelector<HTMLSelectElement>(
@@ -1180,30 +1072,20 @@ describe("atomic comparison painting", () => {
     );
     if (secondary !== null) {
       secondary.value =
-        Array.from(secondary.options).find(
-          (option) => option.textContent === "Reference",
-        )?.value ?? "";
+        Array.from(secondary.options).find((option) => option.textContent === "Reference")?.value ??
+        "";
       secondary.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    expect(
-      element.querySelector(".kaleidoscope-comparison__canvas"),
-    ).toBe(complete);
+    expect(element.querySelector(".kaleidoscope-comparison__canvas")).toBe(complete);
     expect(complete?.getAttribute("aria-label")).toContain("Filtered");
 
-    model.emit(
-      selectedFrameSet(1, 1, 0, ["Source", "Reference"]),
-      payloads(),
-    );
+    model.emit(selectedFrameSet(1, 1, 0, ["Source", "Reference"]), payloads());
     await vi.waitFor(() =>
       expect(
-        element
-          .querySelector(".kaleidoscope-comparison__canvas")
-          ?.getAttribute("aria-label"),
+        element.querySelector(".kaleidoscope-comparison__canvas")?.getAttribute("aria-label"),
       ).toContain("Reference"),
     );
-    expect(
-      element.querySelector(".kaleidoscope-comparison__canvas"),
-    ).not.toBe(complete);
+    expect(element.querySelector(".kaleidoscope-comparison__canvas")).not.toBe(complete);
   });
 });

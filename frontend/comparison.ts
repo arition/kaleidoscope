@@ -1,8 +1,4 @@
-import type {
-  ClipId,
-  ComparisonMode,
-  PreviewMetadataMessage,
-} from "./protocol.js";
+import type { ClipId, ComparisonMode, PreviewMetadataMessage } from "./protocol.js";
 
 export interface ComparisonState {
   readonly mode: ComparisonMode;
@@ -27,17 +23,12 @@ export interface ComparisonTransitionResult {
   requiresFrameSet: boolean;
 }
 
-const alignedModes = new Set<ComparisonMode>([
-  "wipe",
-  "overlay",
-  "difference",
-]);
+const alignedModes = new Set<ComparisonMode>(["wipe", "overlay", "difference"]);
 
 const idsEqual = (left: ClipId, right: ClipId): boolean => left === right;
 
 const activeSetsEqual = (left: ClipId[], right: ClipId[]): boolean =>
-  left.length === right.length &&
-  left.every((clipId, index) => idsEqual(clipId, right[index]));
+  left.length === right.length && left.every((clipId, index) => idsEqual(clipId, right[index]));
 
 const clipById = (metadata: PreviewMetadataMessage, clipId: ClipId) => {
   const clip = metadata.clips.find((candidate) => idsEqual(candidate.id, clipId));
@@ -47,14 +38,9 @@ const clipById = (metadata: PreviewMetadataMessage, clipId: ClipId) => {
   return clip;
 };
 
-const normalizeSelection = (
-  metadata: PreviewMetadataMessage,
-  requested: ClipId[],
-): ClipId[] => {
+const normalizeSelection = (metadata: PreviewMetadataMessage, requested: ClipId[]): ClipId[] => {
   const selected = new Set(requested);
-  const normalized = metadata.clips
-    .map((clip) => clip.id)
-    .filter((clipId) => selected.has(clipId));
+  const normalized = metadata.clips.map((clip) => clip.id).filter((clipId) => selected.has(clipId));
   if (normalized.length !== selected.size) {
     throw new Error("The comparison selection contains an unknown clip.");
   }
@@ -75,8 +61,7 @@ const resolvePair = (
     }
     const clip = clipById(metadata, clipId);
     return (
-      firstClip.source_width === clip.source_width &&
-      firstClip.source_height === clip.source_height
+      firstClip.source_width === clip.source_width && firstClip.source_height === clip.source_height
     );
   };
   let second =
@@ -113,9 +98,7 @@ const resolvePair = (
   return [first, second];
 };
 
-export const createComparisonState = (
-  metadata: PreviewMetadataMessage,
-): ComparisonState => {
+export const createComparisonState = (metadata: PreviewMetadataMessage): ComparisonState => {
   const primary = metadata.active_clip_ids[0];
   const secondary = metadata.active_clip_ids[1];
   return {
@@ -144,31 +127,18 @@ export const transitionComparisonState = (
     secondary = undefined;
     activeClipIds = [primary];
   } else if (mode === "side-by-side") {
-    const selected =
-      transition.selectedClipIds ?? current.activeClipIds;
+    const selected = transition.selectedClipIds ?? current.activeClipIds;
     activeClipIds = normalizeSelection(metadata, selected);
-    if (
-      activeClipIds.length === 0 ||
-      activeClipIds.length > metadata.max_visible_clips
-    ) {
-      throw new Error(
-        `Side-by-side comparison requires 1-${metadata.max_visible_clips} clips.`,
-      );
+    if (activeClipIds.length === 0 || activeClipIds.length > metadata.max_visible_clips) {
+      throw new Error(`Side-by-side comparison requires 1-${metadata.max_visible_clips} clips.`);
     }
     primary = activeClipIds[0];
     secondary = undefined;
   } else if (alignedModes.has(mode)) {
     if (metadata.max_visible_clips < 2) {
-      throw new Error(
-        "Aligned comparison exceeds the configured visible-clip limit.",
-      );
+      throw new Error("Aligned comparison exceeds the configured visible-clip limit.");
     }
-    [primary, secondary] = resolvePair(
-      metadata,
-      current,
-      transition.primary,
-      transition.secondary,
-    );
+    [primary, secondary] = resolvePair(metadata, current, transition.primary, transition.secondary);
     activeClipIds = [primary, secondary];
   } else {
     throw new Error(`Unsupported comparison mode ${mode}.`);
@@ -179,20 +149,11 @@ export const transitionComparisonState = (
     activeClipIds,
     primary,
     secondary,
-    overlayOpacity: Math.min(
-      1,
-      Math.max(0, transition.overlayOpacity ?? current.overlayOpacity),
-    ),
-    wipePosition: Math.min(
-      1,
-      Math.max(0, transition.wipePosition ?? current.wipePosition),
-    ),
+    overlayOpacity: Math.min(1, Math.max(0, transition.overlayOpacity ?? current.overlayOpacity)),
+    wipePosition: Math.min(1, Math.max(0, transition.wipePosition ?? current.wipePosition)),
   };
   return {
     state,
-    requiresFrameSet: !activeSetsEqual(
-      current.activeClipIds,
-      state.activeClipIds,
-    ),
+    requiresFrameSet: !activeSetsEqual(current.activeClipIds, state.activeClipIds),
   };
 };

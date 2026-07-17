@@ -55,8 +55,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
     print(
-        f"All {len(TARGETS)} branch-coverage targets meet "
-        f"{MINIMUM_BRANCH_COVERAGE:.2f}%.",
+        f"All {len(TARGETS)} branch-coverage targets meet {MINIMUM_BRANCH_COVERAGE:.2f}%.",
     )
     return 0
 

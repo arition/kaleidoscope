@@ -71,9 +71,7 @@ class VapourSynthRuntime:
     audio_node_type: type[Any]
     get_outputs: Callable[[], Mapping[int, object]]
     read_color_metadata: Callable[[object], ColorMetadata]
-    prepare_rgb24: Callable[
-        [object, int, int, int | None, int | None, int | None], object
-    ]
+    prepare_rgb24: Callable[[object, int, int, int | None, int | None, int | None], object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,9 +193,7 @@ def _normalize_inputs(
             selected_output_ids = sorted(snapshot)
         else:
             if not output_ids or any(
-                not isinstance(output_id, int)
-                or isinstance(output_id, bool)
-                or output_id < 0
+                not isinstance(output_id, int) or isinstance(output_id, bool) or output_id < 0
                 for output_id in output_ids
             ):
                 raise KaleidoscopeError(
@@ -346,9 +342,7 @@ def _prepare_preview_node(
         }[color_family]
         default_range = _RANGE_LIMITED if color_family == "yuv" else _RANGE_FULL
         matrix = metadata.matrix if metadata.matrix is not None else default_matrix
-        transfer = (
-            metadata.transfer if metadata.transfer is not None else _TRANSFER_BT709
-        )
+        transfer = metadata.transfer if metadata.transfer is not None else _TRANSFER_BT709
         color_range = metadata.range if metadata.range is not None else default_range
         assumed: list[str] = []
         if metadata.matrix is None and default_matrix is not None:
@@ -549,9 +543,7 @@ def _resolve_selection(
         )
     selected_primary = _resolve_id(primary, clip_ids, fallback=first)
     if secondary is None:
-        selected_secondary = next(
-            clip_id for clip_id in clip_ids if clip_id != selected_primary
-        )
+        selected_secondary = next(clip_id for clip_id in clip_ids if clip_id != selected_primary)
     else:
         selected_secondary = _resolve_id(secondary, clip_ids, fallback=first)
     if selected_secondary == selected_primary:
@@ -635,11 +627,7 @@ def build_preview_config(
             "invalid_encoding",
             "lossless=True is only available with codec='webp'.",
         )
-    if (
-        not isinstance(cache_size, int)
-        or isinstance(cache_size, bool)
-        or cache_size < 0
-    ):
+    if not isinstance(cache_size, int) or isinstance(cache_size, bool) or cache_size < 0:
         raise KaleidoscopeError("invalid_clip", "cache_size must be non-negative.")
     if (
         not isinstance(max_in_flight, int)

@@ -36,18 +36,11 @@ class ByteBoundedLRU(Generic[_Key, _Value]):
             replaced = self._entries.pop(key, None)
             if replaced is not None:
                 self._current_bytes -= replaced[1]
-            if (
-                self._max_entries == 0
-                or self._max_bytes == 0
-                or byte_size > self._max_bytes
-            ):
+            if self._max_entries == 0 or self._max_bytes == 0 or byte_size > self._max_bytes:
                 return
             self._entries[key] = (value, byte_size)
             self._current_bytes += byte_size
-            while (
-                len(self._entries) > self._max_entries
-                or self._current_bytes > self._max_bytes
-            ):
+            while len(self._entries) > self._max_entries or self._current_bytes > self._max_bytes:
                 _, (_, evicted_size) = self._entries.popitem(last=False)
                 self._current_bytes -= evicted_size
 

@@ -25,9 +25,7 @@ def test_browser_harness_is_staged_without_exposing_the_repository(
 
     fixture_script.stage_harness(site)
 
-    files = {
-        path.relative_to(site).as_posix() for path in site.rglob("*") if path.is_file()
-    }
+    files = {path.relative_to(site).as_posix() for path in site.rglob("*") if path.is_file()}
     assert files == {
         "src/kaleidoscope/static/index.css",
         "src/kaleidoscope/static/index.js",

@@ -117,7 +117,10 @@ describe("playback lifecycle", () => {
   });
 
   it("does not let pending autoplay override an explicit pause", async () => {
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { model, element } = await setup();
     model.emit(metadata(true));
@@ -169,9 +172,7 @@ describe("playback lifecycle", () => {
     );
 
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }
@@ -186,29 +187,30 @@ describe("playback lifecycle", () => {
         "type" in message &&
         message.type === "request_frame_set",
     );
-    expect(requests.map(({ request_id, generation, frame }) => ({
-      request_id,
-      generation,
-      frame,
-    }))).toEqual([
+    expect(
+      requests.map(({ request_id, generation, frame }) => ({
+        request_id,
+        generation,
+        frame,
+      })),
+    ).toEqual([
       { request_id: 0, generation: 0, frame: 0 },
       { request_id: 1, generation: 1, frame: 5 },
     ]);
     expect(playingStates(model)).toEqual([true, false]);
 
     model.emit(frameSet(1, 1, 5), [new DataView(new Uint8Array([1]).buffer)]);
-    await vi.waitFor(() =>
-      expect(playingStates(model)).toEqual([true, false, true]),
-    );
+    await vi.waitFor(() => expect(playingStates(model)).toEqual([true, false, true]));
     expect(element.querySelector("button[aria-label='Pause']")).not.toBeNull();
   });
 
   it("resumes from visibility only when playback was active before hiding", async () => {
     let visibility: DocumentVisibilityState = "visible";
-    vi.spyOn(document, "visibilityState", "get").mockImplementation(
-      () => visibility,
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
     );
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { model, element } = await setup();
     model.emit(metadata(false));
@@ -232,11 +234,12 @@ describe("playback lifecycle", () => {
 
   it("does not restart from zero when visibility pause samples the final frame", async () => {
     let visibility: DocumentVisibilityState = "visible";
-    vi.spyOn(document, "visibilityState", "get").mockImplementation(
-      () => visibility,
-    );
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
     vi.spyOn(performance, "now").mockReturnValue(0);
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { model, element } = await setup();
     model.emit(metadata(false));
@@ -256,8 +259,7 @@ describe("playback lifecycle", () => {
 
     expect(playingStates(model)).toEqual([true, false]);
     expect(
-      element.querySelector<HTMLInputElement>("input[aria-label='Current frame']")
-        ?.value,
+      element.querySelector<HTMLInputElement>("input[aria-label='Current frame']")?.value,
     ).toBe("9");
     expect(element.querySelector("button[aria-label='Play']")).not.toBeNull();
     const restart = model.sent.find(
@@ -277,9 +279,7 @@ describe("playback lifecycle", () => {
   it("invalidates an older playback response when the document hides", async () => {
     let scheduled: FrameRequestCallback | undefined;
     let visibility: DocumentVisibilityState = "visible";
-    vi.spyOn(document, "visibilityState", "get").mockImplementation(
-      () => visibility,
-    );
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
     vi.spyOn(performance, "now").mockReturnValue(0);
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -316,20 +316,18 @@ describe("playback lifecycle", () => {
       }),
     );
     expect(
-      element.querySelector<HTMLInputElement>("input[aria-label='Current frame']")
-        ?.value,
+      element.querySelector<HTMLInputElement>("input[aria-label='Current frame']")?.value,
     ).toBe("4");
-    expect(element.querySelector("[role='status']")?.textContent).toBe(
-      "Frame 0 ready.",
-    );
+    expect(element.querySelector("[role='status']")?.textContent).toBe("Frame 0 ready.");
   });
 
   it("defers autoplay until a hidden document becomes visible", async () => {
     let visibility: DocumentVisibilityState = "hidden";
-    vi.spyOn(document, "visibilityState", "get").mockImplementation(
-      () => visibility,
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
     );
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     const { model } = await setup();
     model.emit(metadata(true));
     model.emit(frameSet(0, 0, 0), [new DataView(new Uint8Array([1]).buffer)]);
@@ -349,10 +347,11 @@ describe("playback lifecycle", () => {
 
   it("defers scrub resume until a hidden document becomes visible", async () => {
     let visibility: DocumentVisibilityState = "visible";
-    vi.spyOn(document, "visibilityState", "get").mockImplementation(
-      () => visibility,
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
     );
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { model, element } = await setup();
     model.emit(metadata(false));
@@ -364,9 +363,7 @@ describe("playback lifecycle", () => {
     );
     element.querySelector<HTMLButtonElement>("button[aria-label='Play']")?.click();
 
-    const seek = element.querySelector<HTMLInputElement>(
-      "input[aria-label='Seek frame']",
-    );
+    const seek = element.querySelector<HTMLInputElement>("input[aria-label='Seek frame']");
     if (seek === null) {
       throw new Error("Missing seek control.");
     }

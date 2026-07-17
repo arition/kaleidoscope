@@ -59,15 +59,11 @@ class PreviewWidget(anywidget.AnyWidget):
         self._view_generation = 0
         self._latest_generation = 0
         self._view_mode = config.mode if config is not None else "single"
-        self._view_active_clip_ids = (
-            tuple(config.active_clip_ids) if config is not None else ()
-        )
+        self._view_active_clip_ids = tuple(config.active_clip_ids) if config is not None else ()
         self._view_overlay_opacity = (
             getattr(config, "overlay_opacity", 0.5) if config is not None else 0.5
         )
-        self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = (
-            "awaiting_ready"
-        )
+        self._frontend_state: Literal["awaiting_ready", "ready", "terminal"] = "awaiting_ready"
         self._close_completed = False
         self._delivered_frames: dict[tuple[int, int], int] = {}
         self.on_msg(self._handle_custom_message)
@@ -240,13 +236,9 @@ class PreviewWidget(anywidget.AnyWidget):
                 self._view_active_clip_ids
                 and tuple(message["clip_ids"]) != self._view_active_clip_ids
             ):
-                raise ValueError(
-                    "Frame-set request clip IDs do not match the active view."
-                )
+                raise ValueError("Frame-set request clip IDs do not match the active view.")
             if message["generation"] < self._view_generation:
-                raise ValueError(
-                    "Frame-set request generation is older than the active view."
-                )
+                raise ValueError("Frame-set request generation is older than the active view.")
             self._session.request_frame_set(
                 request_id=message["request_id"],
                 generation=message["generation"],
@@ -258,9 +250,7 @@ class PreviewWidget(anywidget.AnyWidget):
                 message["generation"],
             )
         except ValueError as exception:
-            self._reject_frontend_message(
-                ProtocolError("invalid_message", str(exception))
-            )
+            self._reject_frontend_message(ProtocolError("invalid_message", str(exception)))
 
     def _apply_view(self, message: SetViewMessage) -> None:
         if self._config is None:
@@ -272,23 +262,17 @@ class PreviewWidget(anywidget.AnyWidget):
         if any(clip_id not in clips for clip_id in clip_ids):
             raise ValueError("Comparison view contains an unknown clip ID.")
         if len(clip_ids) > self._config.max_visible_clips:
-            raise ValueError(
-                "Comparison view exceeds the configured visible-clip limit."
-            )
+            raise ValueError("Comparison view exceeds the configured visible-clip limit.")
         if mode in {"wipe", "overlay", "difference"}:
             first, second = (clips[clip_id] for clip_id in clip_ids)
             if (
                 first.source_width != second.source_width
                 or first.source_height != second.source_height
             ):
-                raise ValueError(
-                    "Aligned comparison clips require matching source dimensions."
-                )
+                raise ValueError("Aligned comparison clips require matching source dimensions.")
         active_changed = clip_ids != self._view_active_clip_ids
         if generation < self._latest_generation:
-            raise ValueError(
-                "Comparison view generation is older than the latest request."
-            )
+            raise ValueError("Comparison view generation is older than the latest request.")
         if (
             active_changed
             and generation == self._latest_generation

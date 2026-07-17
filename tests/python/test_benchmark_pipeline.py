@@ -156,9 +156,7 @@ def test_release_benchmark_report_uses_requested_identity_and_paths() -> None:
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     results["environment"]["git_index_tree"] = "0123456789abcdef"
@@ -204,9 +202,7 @@ def test_release_benchmark_holds_and_fails_when_any_gate_fails(
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     if failed_gate == "latency":
@@ -237,9 +233,7 @@ def test_release_benchmark_recomputes_stale_serialized_decision() -> None:
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     playback = results["scenarios"]["direct_1x_1280x720"]["playback"]["30_fps"]
@@ -268,9 +262,7 @@ def test_release_benchmark_holds_for_malformed_playback_evidence(
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     playback = results["scenarios"]["direct_1x_1280x720"]["playback"]["30_fps"]
@@ -300,9 +292,7 @@ def test_release_benchmark_recomputes_gate_inputs_from_raw_samples(
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     results["decision"] = pipeline._decision(results)
@@ -338,17 +328,13 @@ def test_release_benchmark_overwrites_cached_combined_latency() -> None:
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     raw = results["scenarios"]["direct_1x_1280x720"]["paused"]["raw"]
     primary_backend = list(raw["request_to_send_ms"])
     primary_browser = list(
-        results["browser"]["fixtures"]["direct_1x_1280x720"]["raw"][
-            "simulated_receive_to_paint_ms"
-        ]
+        results["browser"]["fixtures"]["direct_1x_1280x720"]["raw"]["simulated_receive_to_paint_ms"]
     )
     raw["simulated_request_to_paint_ms"] = [60_000.0] * len(primary_backend)
 
@@ -368,18 +354,14 @@ def test_release_report_recomputes_visible_derived_metrics() -> None:
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t13-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t13-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     playback = results["scenarios"]["direct_1x_1280x720"]["playback"]["30_fps"]
     playback["backend_cpu_ms"] = 1500.0
     playback["backend_cpu_core_equivalents"] = -1.0
     fixture = results["browser"]["fixtures"]["direct_4x_640x360"]
-    fixture["raw"]["decode_barrier_ms"] = [60_000.0] * len(
-        fixture["raw"]["decode_barrier_ms"]
-    )
+    fixture["raw"]["decode_barrier_ms"] = [60_000.0] * len(fixture["raw"]["decode_barrier_ms"])
     fixture["cdp"]["js_heap_used_before_bytes"] = 1024.0
     fixture["cdp"]["js_heap_used_after_bytes"] = 5120.0
     fixture["cdp"]["js_heap_used_delta_bytes"] = -1.0
@@ -422,9 +404,7 @@ def test_release_benchmark_holds_when_playback_lag_is_unbounded(
     results = cast(
         dict[str, Any],
         json.loads(
-            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(
-                encoding="utf-8"
-            )
+            (pipeline.ROOT / "benchmarks/results/t6-pipeline.json").read_text(encoding="utf-8")
         ),
     )
     playback = results["scenarios"]["direct_1x_1280x720"]["playback"]["30_fps"]

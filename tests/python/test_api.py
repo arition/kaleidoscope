@@ -224,9 +224,7 @@ def test_preview_routes_frame_request_to_binary_widget_message(
         audio_node_type=FakeAudioNode,
         get_outputs=lambda: {},
         read_color_metadata=lambda source: ColorMetadata(),
-        prepare_rgb24=(
-            lambda source, width, height, matrix, transfer, color_range: source
-        ),
+        prepare_rgb24=(lambda source, width, height, matrix, transfer, color_range: source),
     )
     monkeypatch.setattr(api, "load_vapoursynth_runtime", lambda: runtime)
     sent: list[tuple[dict[str, object], list[bytes] | None]] = []

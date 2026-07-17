@@ -58,9 +58,7 @@ def capture_frame_set(
             [],
         )
         assert delivered.wait(10), sent
-        frame_set, buffers = next(
-            item for item in sent if item[0]["type"] == "frame_set"
-        )
+        frame_set, buffers = next(item for item in sent if item[0]["type"] == "frame_set")
         assert buffers is not None
         widget.close()
         return frame_set, buffers
@@ -111,12 +109,8 @@ def main() -> None:
     }
     output.mkdir(parents=True, exist_ok=True)
     (output / "cases.json").write_text(json.dumps(payload))
-    (output / "index.js").write_bytes(
-        (package_dir / "static" / "index.js").read_bytes()
-    )
-    (output / "index.css").write_bytes(
-        (package_dir / "static" / "index.css").read_bytes()
-    )
+    (output / "index.js").write_bytes((package_dir / "static" / "index.js").read_bytes())
+    (output / "index.css").write_bytes((package_dir / "static" / "index.css").read_bytes())
     harness = Path(__file__).with_name("installed_browser_harness")
     (output / "index.html").write_bytes((harness / "index.html").read_bytes())
     (output / "model.js").write_bytes((harness / "model.js").read_bytes())

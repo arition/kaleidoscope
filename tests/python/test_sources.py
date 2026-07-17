@@ -93,9 +93,7 @@ def test_single_clip_normalizes_to_an_immutable_ordered_config() -> None:
     assert config.active_clip_ids == (0,)
     assert config.num_frames == 240
     assert config.fps == Fraction(24, 1)
-    assert [(item.id, item.label, item.node) for item in config.clips] == [
-        (0, "Clip 0", clip)
-    ]
+    assert [(item.id, item.label, item.node) for item in config.clips] == [(0, "Clip 0", clip)]
     with pytest.raises(FrozenInstanceError):
         config.clips[0].label = "Changed"  # type: ignore[misc]
 
@@ -248,10 +246,7 @@ def test_real_vapoursynth_direct_node_and_sparse_registry() -> None:
             "Output 3",
             "Output 9",
         ]
-        assert all(
-            isinstance(clip.node, vapoursynth.VideoNode)
-            for clip in registry_config.clips
-        )
+        assert all(isinstance(clip.node, vapoursynth.VideoNode) for clip in registry_config.clips)
     finally:
         vapoursynth.clear_outputs()
 
@@ -512,9 +507,7 @@ def test_rgb24_is_reused_without_warnings() -> None:
 def test_yuv_fallback_builds_one_rgb24_node_with_assumption_warnings() -> None:
     clip = FakeVideoNode(width=1920, height=1080, format_name="YUV420P8")
     prepared = FakeVideoNode(width=1920, height=1080)
-    prepare_calls: list[
-        tuple[object, int, int, int | None, int | None, int | None]
-    ] = []
+    prepare_calls: list[tuple[object, int, int, int | None, int | None, int | None]] = []
 
     def prepare_rgb24(
         node: object,
@@ -550,9 +543,7 @@ def test_yuv_fallback_builds_one_rgb24_node_with_assumption_warnings() -> None:
 
 def test_yuv_fallback_uses_complete_source_color_metadata_without_assumption() -> None:
     clip = FakeVideoNode(format_name="YUV420P8")
-    prepare_calls: list[
-        tuple[object, int, int, int | None, int | None, int | None]
-    ] = []
+    prepare_calls: list[tuple[object, int, int, int | None, int | None, int | None]] = []
 
     def prepare_rgb24(
         node: object,
@@ -574,9 +565,7 @@ def test_yuv_fallback_uses_complete_source_color_metadata_without_assumption() -
         ),
     )
 
-    assert [warning.code for warning in config.clips[0].warnings] == [
-        "automatic_rgb24_conversion"
-    ]
+    assert [warning.code for warning in config.clips[0].warnings] == ["automatic_rgb24_conversion"]
     assert prepare_calls == [(clip, 1920, 1080, 5, 6, 1)]
 
 
