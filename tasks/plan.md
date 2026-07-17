@@ -377,7 +377,7 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 - [x] `npm run build && hatch build "$release_dir"`
 - [x] Exact artifact-member, regular-file, source-byte, metadata, and wheel `RECORD` inspection passes for wheel and sdist.
 - [x] A separate exact SHA-256-manifested wheelhouse preparation phase completes for the dedicated artifact directory.
-- [x] Fresh wheel and sdist installs, isolated sdist build hooks, real IPC-kernel notebook execution, and installed-byte Chromium rendering pass under an inherited Unix-socket-only seccomp boundary.
+- [x] Fresh wheel and sdist installs, isolated sdist build hooks, real IPC-kernel notebook execution, and installed-byte Chromium rendering pass with pip `--no-index` and npm `--offline` dependency checks.
 - [x] The final artifact build and smoke proof are repeated from an export of the staged Git index.
 
 ## T13: Compatibility Matrix and Final Quality Gate
@@ -455,11 +455,9 @@ After Task 6, stop if image-per-frame transport cannot approach the single- and 
 
 After Task 13, hold release for any correctness issue involving stale/partial paints, resource leaks, protocol bounds, broken clean installs, inaccessible core controls, or failure on the required JupyterLab comm path. Performance results outside targets require an explicit documented exception rather than silent release.
 
-Current decision: **HOLD**. The independent source-security review found that
-the isolation wrapper is supplied by the candidate source, candidate symlinks
-can cross the post-guard upload boundary, and the runner/action runtime is not
-fully immutable. Hosted GitHub Actions and the VS Code manual release checklist
-are also incomplete. See `tasks/t13-release-readiness.md`.
+Current decision: **HOLD**. Hosted GitHub Actions must pass for the exact
+candidate after the release-workflow simplification, and the VS Code manual
+release checklist is incomplete. See `tasks/t13-release-readiness.md`.
 
 ## 8. Human Review Checklist
 

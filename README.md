@@ -100,18 +100,15 @@ preview(
 
 ```bash
 npm ci
+npx playwright install --with-deps chromium
 npm run check
 npm test -- --run
 npm run build
 release_dir=dist/release-candidate
-release_guard=dist/release-network-guard
-.venv/bin/hatch build "$release_dir"
+.venv/bin/python -m hatchling build --directory "$release_dir"
 KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" .venv/bin/hatch run test:prepare-wheelhouse
-cc -std=c11 -O2 -Wall -Wextra -Werror \
-    -o "$release_guard" tests/packaging/network_guard.c
-KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
-    "$release_guard" sh -eu -c \
-      '.venv/bin/hatch run test:pytest && .venv/bin/hatch run test:artifact-smoke'
+KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" .venv/bin/hatch run test:pytest
+KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" .venv/bin/hatch run test:artifact-smoke
 ```
 
 Run `npm run fmt` to apply Oxfmt to frontend sources and configuration.
@@ -121,14 +118,13 @@ source distributions install without Node.js or a runtime network request.
 Contributors must run `npm run build` before `hatch build` after changing
 frontend sources. The exact release filenames are selected inside the dedicated
 artifact directory, so unrelated files are left untouched. The initial `npm ci`,
-artifact build, wheelhouse preparation, and network-guard compilation are the
-network-enabled preparation phase. The artifact pytest repeats `npm ci --offline`
-from the populated npm cache to prove the committed bundle comes from the
-lockfile toolchain. Both post-preparation checks run beneath one inherited Linux
-seccomp filter. Pytest and artifact smoke therefore run their complete
-process trees with only Unix-domain `socket()` and `socketpair()` creation
-permitted; IPv4, IPv6, packet, netlink, x32, and `io_uring` network paths are
-denied.
+Playwright browser installation, artifact build, and wheelhouse preparation are
+the network-enabled preparation phase. Artifact pytest repeats `npm ci --offline`
+from the populated npm cache,
+and fresh artifact installs use pip `--no-index` with the prepared wheelhouse.
+These checks prove that Python and npm dependency resolution succeeds from the
+prepared local stores. They do not block arbitrary network access by tests or
+runtime code and are not a sandbox for deliberately malicious source code.
 
 ## License
 

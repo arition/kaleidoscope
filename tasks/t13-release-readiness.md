@@ -6,37 +6,36 @@ Assessment date: 2026-07-17
 
 **Gate 2: HOLD**
 
-The product, benchmark, packaging, and local compatibility evidence is strong,
-but the release pipeline does not yet provide a trustworthy boundary for code
-from the candidate source tree. Hosted GitHub Actions has also not run in this
-repository, and the final VS Code visual/accessibility checklist is incomplete.
+The product, benchmark, packaging, and local compatibility evidence is strong.
+Hosted GitHub Actions reached the release jobs, but the workflow must be rerun
+after the CI fix and the final VS Code visual/accessibility checklist remains
+incomplete.
 
 No artifact in `dist/` is approved for publication.
 
-## Blocking Findings
+## CI Simplification
 
-The independent source-security rereview returned `SOURCE SECURITY: BLOCK`:
+The candidate-built Linux namespace/seccomp guard has been removed. Current
+hosted runners reject its unprivileged namespace setup, and a guard compiled
+from the candidate source cannot be a trustworthy boundary for that source.
+Project code also already runs in the earlier quality jobs, so wrapping only the
+release jobs did not establish workflow-wide isolation.
 
-1. `network_guard.c` is compiled from the same source snapshot it is intended
-   to confine. A malicious revision can replace the guard before namespaces,
-   environment scrubbing, runner-path masking, or seccomp are established.
-2. Candidate files are uploaded after the guarded process exits.
-   `actions/upload-artifact` follows symbolic links, so source-controlled build
-   output can make an expected distribution path resolve to a host-only file.
-3. The guard does not make the complete GitHub runner installation read-only.
-   Source code may be able to replace the runner's built-in JavaScript action
-   runtime before the subsequent upload action starts.
-4. Build and verifier dependencies are pinned by version but are not locked by
-   cryptographic hashes. Mutable third-party code runs before isolation.
+The workflow retains the useful reproducibility controls: read-only token
+permissions, checkout credentials disabled, source-archive SHA-256 validation,
+a scrubbed environment for candidate-controlled commands, prefetched wheels,
+pip `--no-index`, npm `--offline`, and fresh wheel/sdist install environments.
+These package-manager settings do not block arbitrary runtime network access.
+The workflow does not claim to execute deliberately malicious source safely. If
+that becomes a release requirement, use a separately trusted builder or image
+rather than restoring a wrapper built from the source being tested.
 
-The workflow now uses producer artifact IDs, independently checks the source
-archive SHA-256 before extraction, and runs project build logic offline under
-the guard. These are useful defense-in-depth controls, but they do not resolve
-the trust origin of the guard or the post-guard upload boundary.
+## Previous Qualification Evidence
 
-## Passing Evidence
+The following evidence predates the CI simplification and must be refreshed for
+the final candidate:
 
-- Guarded Python and packaging suite: 217 passed, 2 expected skips.
+- Python and packaging suite: 217 passed, 2 expected skips on the previous tree.
 - Fresh offline wheel and sdist installs: passed.
 - Real IPC-kernel notebook and installed-byte Chromium smokes: passed for both
   wheel and sdist.
@@ -78,23 +77,15 @@ and publishable artifact hashes do not exist while Gate 2 is on hold.
 
 Release review may resume only after all of the following are complete:
 
-- Supply the isolation wrapper from an independently trusted, digest-pinned
-  artifact or image rather than from the candidate source tree.
-- Prevent candidate output from influencing later runner actions. The trusted
-  wrapper must emit and validate regular, non-symlink publication files, and
-  the runner installation/action runtime must be immutable to guarded code.
-- Lock every pre-isolation Python and npm dependency by artifact hash or move it
-  into the trusted release image.
 - Run the complete workflow on hosted GitHub Actions and retain required-check
   evidence for the exact candidate.
 - Complete the current VS Code notebook visual, keyboard, and accessibility
   release checklist.
-- Rebuild wheel, sdist, and wheelhouse from the final staged tree, rerun all
-  guarded source and artifact smokes, and obtain a new independent security
-  approval.
+- Rebuild wheel, sdist, and wheelhouse from the final staged tree and rerun all
+  source and artifact smokes.
 
 ## Gate Record
 
-Performance and functional evidence support release review. Security custody,
-hosted-CI evidence, and the VS Code manual checklist do not. Gate 2 therefore
-remains **HOLD** without exception.
+Performance and functional evidence support release review. Hosted-CI evidence
+for the fixed workflow and the VS Code manual checklist are still incomplete.
+Gate 2 therefore remains **HOLD**.

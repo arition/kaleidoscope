@@ -174,7 +174,8 @@ jobs:
           source_dir="$PWD/dist/release-source-tree"
           tools_dir="$PWD/dist/build-tools"
           wheelhouse_source="$PWD/dist/prefetched-wheelhouse"
-          release_guard="$PWD/dist/release-build-guard"
+          build_home="$PWD/dist/build-home"
+          build_path="$tools_dir/bin:/usr/local/bin:/usr/bin:/bin"
           printf '%s  %s\n' \
             '${{ needs.source-snapshot.outputs.sha256 }}' \
             dist/release-source/source.tar.gz | sha256sum -c -
@@ -194,17 +195,31 @@ jobs:
             "Pillow>=12.1,<13" \
             "traitlets>=5.15,<6" \
             "VapourSynth>=77,<78"
+          mkdir -p "$build_home/tmp"
           cd "$source_dir"
-          cc -std=c11 -O2 -Wall -Wextra -Werror \
-            -o "$release_guard" tests/packaging/network_guard.c
-          exec env \
+          env -i \
+            HOME="$build_home" \
+            LANG=C.UTF-8 \
+            PATH="$build_path" \
+            TMPDIR="$build_home/tmp" \
+            PYTHONNOUSERSITE=1 \
+            PIP_CONFIG_FILE=/dev/null \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PIP_NO_INDEX=1 \
+            KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
+            "$tools_dir/bin/python" -m hatchling build --directory "$release_dir"
+          env -i \
+            HOME="$build_home" \
+            LANG=C.UTF-8 \
+            PATH="$build_path" \
+            TMPDIR="$build_home/tmp" \
+            PYTHONNOUSERSITE=1 \
+            PIP_CONFIG_FILE=/dev/null \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PIP_NO_INDEX=1 \
             KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
             KALEIDOSCOPE_WHEELHOUSE_SOURCE="$wheelhouse_source" \
-            "$release_guard" sh -eu -c \
-              '"$0" -m hatchling build --directory "$1" && \
-               "$0" tests/packaging/prepare_wheelhouse.py' \
-              "$tools_dir/bin/python" \
-              "$release_dir"
+            "$tools_dir/bin/python" tests/packaging/prepare_wheelhouse.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: upload-candidate
         with:
@@ -231,7 +246,10 @@ jobs:
           artifact-ids: ${{ needs.source-snapshot.outputs.artifact-id }}
           path: dist/release-source
           merge-multiple: true
-      - name: Verify release offline
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Prepare verifier and check offline installs
         run: |
           release_dir="$PWD/dist/release-candidate"
           source_dir="$PWD/dist/release-source-tree"
@@ -239,7 +257,22 @@ jobs:
           frontend_tools="$tools_dir/frontend"
           npm_cache="$tools_dir/npm-cache"
           playwright_browsers="$tools_dir/playwright-browsers"
-          release_guard="$PWD/dist/release-network-guard"
+          setup_home="$PWD/dist/setup-home"
+          verify_home="$PWD/dist/verify-home"
+          node_command="$(command -v node)"
+          npm_command="$(command -v npm)"
+          case "$node_command" in
+            "$RUNNER_TOOL_CACHE"/node/*/x64/bin/node) ;;
+            *) printf 'Unexpected setup-node executable: %s\n' "$node_command" >&2; exit 1 ;;
+          esac
+          case "$npm_command" in
+            "$RUNNER_TOOL_CACHE"/node/*/x64/bin/npm) ;;
+            *) printf 'Unexpected setup-node npm: %s\n' "$npm_command" >&2; exit 1 ;;
+          esac
+          node_bin="$(dirname "$node_command")"
+          test "$node_bin" = "$(dirname "$npm_command")"
+          setup_path="$node_bin:/usr/bin:/bin"
+          verify_path="$tools_dir/bin:$node_bin:/usr/bin:/bin"
           printf '%s  %s\n' \
             '${{ needs.source-snapshot.outputs.sha256 }}' \
             dist/release-source/source.tar.gz | sha256sum -c -
@@ -257,31 +290,65 @@ jobs:
             "pytest-cov>=7,<8" \
             "PyYAML>=6,<7" \
             "VapourSynth>=77,<78"
-          mkdir -p "$frontend_tools" "$npm_cache" "$playwright_browsers"
+          mkdir -p \
+            "$frontend_tools" \
+            "$npm_cache" \
+            "$playwright_browsers" \
+            "$setup_home/tmp"
           cp "$source_dir/package.json" "$source_dir/package-lock.json" \
             "$frontend_tools/"
-          npm ci \
+          env -i \
+            HOME="$setup_home" \
+            LANG=C.UTF-8 \
+            PATH="$setup_path" \
+            TMPDIR="$setup_home/tmp" \
+            "$npm_command" ci \
             --prefix "$frontend_tools" \
             --cache "$npm_cache" \
             --ignore-scripts \
             --no-audit \
             --no-fund
-          PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
+          env -i \
+            HOME="$setup_home" \
+            LANG=C.UTF-8 \
+            PATH="$setup_path" \
+            TMPDIR="$setup_home/tmp" \
+            PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
             "$frontend_tools/node_modules/.bin/playwright" \
             install --with-deps chromium
           ln -s "$frontend_tools/node_modules" "$source_dir/node_modules"
+          mkdir -p "$verify_home/tmp"
           cd "$source_dir"
-          cc -std=c11 -O2 -Wall -Wextra -Werror \
-            -o "$release_guard" tests/packaging/network_guard.c
-          exec env \
+          env -i \
+            HOME="$verify_home" \
+            LANG=C.UTF-8 \
+            PATH="$verify_path" \
+            TMPDIR="$verify_home/tmp" \
+            PYTHONNOUSERSITE=1 \
+            PIP_CONFIG_FILE=/dev/null \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PIP_NO_INDEX=1 \
+            npm_config_offline=true \
             PYTHONPATH="$source_dir/src:$source_dir" \
             KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
             KALEIDOSCOPE_NPM_CACHE="$npm_cache" \
             KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
-            "$release_guard" sh -eu -c \
-              '"$0" -m pytest tests/python tests/packaging && \
-               "$0" tests/packaging/smoke_artifacts.py' \
-              "$tools_dir/bin/python"
+            "$tools_dir/bin/python" -m pytest tests/python tests/packaging
+          env -i \
+            HOME="$verify_home" \
+            LANG=C.UTF-8 \
+            PATH="$verify_path" \
+            TMPDIR="$verify_home/tmp" \
+            PYTHONNOUSERSITE=1 \
+            PIP_CONFIG_FILE=/dev/null \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PIP_NO_INDEX=1 \
+            npm_config_offline=true \
+            PYTHONPATH="$source_dir/src:$source_dir" \
+            KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
+            KALEIDOSCOPE_NPM_CACHE="$npm_cache" \
+            KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
+            "$tools_dir/bin/python" tests/packaging/smoke_artifacts.py
 
   artifacts:
     name: Publish verified distributions

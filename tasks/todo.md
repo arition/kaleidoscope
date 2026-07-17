@@ -1,7 +1,7 @@
 # Kaleidoscope Task List
 
 Status: T13 assessed; G2 HOLD pending security remediation and host evidence
-Source plan: `tasks/plan.md`  
+Source plan: `tasks/plan.md`
 Source spec: `tasks/spec.md`, revision 0.6 approved
 
 Do not start product implementation until Gate 0 is complete. Check a task only after its acceptance criteria and listed verification pass.
@@ -108,7 +108,7 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [ ] Complete the host matrix; JupyterLab, Notebook 7, Chromium, and Firefox pass, while the VS Code manual checklist remains open.
   - [x] Run final performance, memory, accessibility, security, and code review.
   - [x] Complete the assessment with an explicit Gate 2 **HOLD** decision.
-  - [ ] Replace the source-owned guard with an independently trusted boundary and requalify an exact-tree candidate.
+  - [ ] Rerun hosted CI for the exact candidate and complete the VS Code manual checklist.
 
 ## Completion Rule
 

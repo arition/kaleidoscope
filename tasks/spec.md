@@ -803,13 +803,13 @@ T6 publishes the summarized result in `tasks/benchmark-report.md` and raw sample
 - Require exact wheel and sdist member manifests, compare every source-managed file byte-for-byte, and verify every wheel `RECORD` hash and size.
 - Prepare a local dependency wheelhouse as a separate, explicitly networked phase.
 - Install each artifact sequentially in a fresh environment using isolated PEP 517 builds, `--no-index`, and the local wheelhouse.
-- Under a native inherited Linux process-tree guard, enter private user, mount,
-  and network namespaces; replace `/run` with a private tmpfs so host Docker,
-  container-runtime, D-Bus, and other service sockets are unavailable; then deny
-  non-Unix socket families, x32 syscall-number bypasses, and `io_uring` with
-  seccomp. Inside that boundary, import the installed package, execute the
-  shipped notebook in a real pathname-IPC Jupyter kernel, and render exact
-  installed ESM/CSS plus installed-backend frame bytes in Chromium.
+- Run artifact checks with a scrubbed environment and explicit pip `--no-index`
+    and npm `--offline` settings. These settings verify package-manager
+    reproducibility from prepared local stores; they do not block arbitrary
+    network access and are not a security boundary for untrusted source code.
+- Import the installed package, execute the shipped notebook in a real
+    pathname-IPC Jupyter kernel, and render exact installed ESM/CSS plus
+    installed-backend frame bytes in Chromium.
 - Verify the notebook produces widget-view MIME outputs without persisted frame buffers, and verify Chromium paints single and two-output comparisons without external requests or console errors.
 - Export the staged Git index, rebuild wheel and sdist from that clean tree, and repeat exact artifact inspection plus installed wheel/sdist smoke tests before committing Task 12.
 

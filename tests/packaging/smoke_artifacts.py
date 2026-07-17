@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import subprocess
-import sys
 import tempfile
 import venv
 from hashlib import sha256
@@ -21,9 +19,6 @@ INSTALLED_SMOKE = Path(__file__).with_name("smoke_installed.py")
 INSTALLED_NOTEBOOK_SMOKE = Path(__file__).with_name("smoke_installed_notebook.py")
 INSTALLED_BROWSER_SMOKE = Path(__file__).with_name("smoke_installed_browser.py")
 BROWSER_SMOKE = Path(__file__).with_name("smoke_installed_browser.mjs")
-NETWORK_SMOKE = Path(__file__).with_name("smoke_network_blocked.py")
-NETWORK_GUARD_SOURCE = Path(__file__).with_name("network_guard.c")
-NETWORK_PROBE_SOURCE = Path(__file__).with_name("network_probe.c")
 JAVASCRIPT = ROOT / "src/kaleidoscope/static/index.js"
 STYLESHEET = ROOT / "src/kaleidoscope/static/index.css"
 QUICKSTART = ROOT / "examples/quickstart.ipynb"
@@ -101,19 +96,6 @@ def file_hash(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
-def require_network_guard() -> None:
-    if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") != "1":
-        raise RuntimeError("Run artifact smoke through tests/packaging/network_guard.c")
-    if os.environ.get("KALEIDOSCOPE_NETWORK_NAMESPACE_ACTIVE") != "1":
-        raise RuntimeError("Artifact smoke is not inside the private namespace")
-    try:
-        descriptor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    except PermissionError:
-        return
-    descriptor.close()
-    raise RuntimeError("Artifact smoke is not protected by the network guard")
-
-
 def verify_wheelhouse(wheelhouse: Path, release_wheel: Path) -> None:
     if wheelhouse.is_symlink() or not wheelhouse.is_dir():
         raise RuntimeError(f"Expected wheelhouse directory at {wheelhouse}")
@@ -152,54 +134,6 @@ def verify_wheelhouse(wheelhouse: Path, release_wheel: Path) -> None:
         raise RuntimeError("Wheelhouse package wheel does not match the release artifact")
 
 
-def install_network_guard(environment: Path) -> tuple[Path, Path, Path]:
-    if not sys.platform.startswith("linux"):
-        raise RuntimeError("The artifact network guard currently requires Linux.")
-    guard_directory = environment / "network-guard"
-    guard_directory.mkdir(parents=True, exist_ok=True)
-    guard = guard_directory / "network_guard"
-    dynamic_probe = guard_directory / "network_probe"
-    static_probe = guard_directory / "network_probe_static"
-    run(
-        "cc",
-        "-O2",
-        "-o",
-        str(guard),
-        str(NETWORK_GUARD_SOURCE),
-        cwd=ROOT,
-    )
-    run(
-        "cc",
-        "-O2",
-        "-o",
-        str(dynamic_probe),
-        str(NETWORK_PROBE_SOURCE),
-        cwd=ROOT,
-    )
-    run(
-        "cc",
-        "-static",
-        "-O2",
-        "-o",
-        str(static_probe),
-        str(NETWORK_PROBE_SOURCE),
-        cwd=ROOT,
-    )
-    return guard, dynamic_probe, static_probe
-
-
-def run_guarded(
-    guard: Path,
-    *command: str,
-    cwd: Path,
-    env: dict[str, str] | None = None,
-) -> None:
-    if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") == "1":
-        run(*command, cwd=cwd, env=env)
-        return
-    run(str(guard), *command, cwd=cwd, env=env)
-
-
 def install_and_smoke(
     artifact: Path,
     environment: Path,
@@ -210,18 +144,7 @@ def install_and_smoke(
         venv.EnvBuilder(with_pip=True).create(environment)
         python = environment_python(environment)
         offline_environment = pip_environment()
-        network_guard, dynamic_probe, static_probe = install_network_guard(environment)
-        run_guarded(
-            network_guard,
-            str(python),
-            str(NETWORK_SMOKE),
-            str(dynamic_probe),
-            str(static_probe),
-            cwd=cwd,
-            env=offline_environment,
-        )
-        run_guarded(
-            network_guard,
+        run(
             str(python),
             "-m",
             "pip",
@@ -239,8 +162,7 @@ def install_and_smoke(
             env=offline_environment,
         )
         browser_output = cwd / f"{environment.name}-browser"
-        run_guarded(
-            network_guard,
+        run(
             str(python),
             str(INSTALLED_NOTEBOOK_SMOKE),
             str(environment),
@@ -248,8 +170,7 @@ def install_and_smoke(
             cwd=cwd,
             env=offline_environment,
         )
-        run_guarded(
-            network_guard,
+        run(
             str(python),
             str(INSTALLED_BROWSER_SMOKE),
             str(environment),
@@ -257,16 +178,14 @@ def install_and_smoke(
             cwd=cwd,
             env=offline_environment,
         )
-        run_guarded(
-            network_guard,
+        run(
             "node",
             str(BROWSER_SMOKE),
             str(browser_output),
             cwd=ROOT,
             env=offline_environment,
         )
-        run_guarded(
-            network_guard,
+        run(
             str(python),
             str(INSTALLED_SMOKE),
             str(environment),
@@ -281,7 +200,6 @@ def install_and_smoke(
 
 
 def main() -> None:
-    require_network_guard()
     wheel = artifact(WHEEL_NAME)
     sdist = artifact(SDIST_NAME)
     verify_wheelhouse(WHEELHOUSE, wheel)

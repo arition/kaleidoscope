@@ -78,11 +78,9 @@ For an offline build, provide `hatchling==1.31.0` through a local wheelhouse and
 configure pip with `--no-index` and `--find-links` for the isolated environment.
 Release verification prepares
 `${KALEIDOSCOPE_ARTIFACT_DIR:-dist}/wheelhouse` separately, then installs the
-wheel and source distribution from that directory. On the supported Linux
-release host, a native process-wide guard enters private user, mount, and network
-namespaces, replaces `/run` with a private tmpfs, and blocks non-Unix socket
-creation for pip, isolated build hooks, kernels, Chromium, and child processes.
-Pathname Unix IPC remains available for the Jupyter kernel smoke, while host
-Docker, container-runtime, D-Bus, and other service sockets are absent. Set
-`KALEIDOSCOPE_ARTIFACT_DIR` to verify artifacts in a dedicated directory without
-deleting unrelated repository output.
+wheel and source distribution from that directory with pip `--no-index`.
+Frontend reconstruction uses npm `--offline` with a prepared cache. These checks
+prove package-manager reproducibility from local stores; they do not block
+arbitrary runtime network access and are not a sandbox for untrusted source.
+Set `KALEIDOSCOPE_ARTIFACT_DIR` to verify artifacts in a dedicated directory
+without deleting unrelated repository output.

@@ -31,3 +31,8 @@ def test_release_toolchain_and_supported_python_versions_are_explicit() -> None:
     assert workflow.count("-m hatchling build --directory") == 1
     assert '"$tools_dir/bin/hatch" build' not in workflow
     assert "hatch>=" not in workflow
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert '.venv/bin/python -m hatchling build --directory "$release_dir"' in readme
+    assert '.venv/bin/hatch build "$release_dir"' not in readme
+    assert "npx playwright install --with-deps chromium" in readme
