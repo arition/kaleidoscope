@@ -17,6 +17,11 @@ WIDGET_VIEW_MIME = "application/vnd.jupyter.widget-view+json"
 WIDGET_STATE_MIME = "application/vnd.jupyter.widget-state+json"
 KERNEL_NAME = "kaleidoscope-installed-notebook-smoke"
 IPC_KERNEL_LAUNCHER = Path(__file__).with_name("ipc_kernel_launcher.py")
+IPC_TEMP_ROOT = Path("/tmp")
+
+
+def ipc_runtime_directory() -> tempfile.TemporaryDirectory[str]:
+    return tempfile.TemporaryDirectory(prefix="ks-ipc-", dir=IPC_TEMP_ROOT)
 
 
 def contains_frame_set(value: Any) -> bool:
@@ -174,7 +179,7 @@ def main() -> None:
     notebook_path = package_dir / "examples" / "quickstart.ipynb"
     notebook = nbformat.read(notebook_path, as_version=4)
 
-    with tempfile.TemporaryDirectory(prefix="kaleidoscope-installed-notebook-") as temporary:
+    with ipc_runtime_directory() as temporary:
         root = Path(temporary)
         kernel_spec_manager = KernelSpecManager(kernel_dirs=[])
         kernel_spec_manager.get_kernel_spec = lambda name: KernelSpec(
