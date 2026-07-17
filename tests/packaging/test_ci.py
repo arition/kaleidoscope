@@ -39,11 +39,7 @@ def assert_hardened_checkouts(
     *,
     required: bool = True,
 ) -> None:
-    checkouts = [
-        step
-        for step in job_steps(job)
-        if str(step.get("uses", "")).startswith("actions/checkout@")
-    ]
+    checkouts = [step for step in job_steps(job) if str(step.get("uses", "")).startswith("actions/checkout@")]
     assert len(checkouts) == int(required)
     if not required:
         return
@@ -106,24 +102,16 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
     assert_blocking_command(frontend_job, "npm test -- --run")
     assert_blocking_command(frontend_job, "npm run test:coverage")
     assert_blocking_command(frontend_job, "npm run build")
-    assert_blocking_command(
-        frontend_job, "git diff --exit-code -- src/kaleidoscope/static"
-    )
+    assert_blocking_command(frontend_job, "git diff --exit-code -- src/kaleidoscope/static")
 
     browser_job = jobs["browser"]
     assert isinstance(browser_job, dict)
     browsers = browser_job["strategy"]["matrix"]["browser"]
     assert set(browsers) == {"chromium", "firefox"}
-    assert_blocking_command(
-        browser_job, "npx playwright install --with-deps ${{ matrix.browser }}"
-    )
-    assert_blocking_command(
-        browser_job, "npm run test:e2e -- --project=${{ matrix.browser }}"
-    )
+    assert_blocking_command(browser_job, "npx playwright install --with-deps ${{ matrix.browser }}")
+    assert_blocking_command(browser_job, "npm run test:e2e -- --project=${{ matrix.browser }}")
     browser_uploads = [
-        step
-        for step in job_steps(browser_job)
-        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        step for step in job_steps(browser_job) if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     ]
     assert len(browser_uploads) == 1
     assert browser_uploads[0].get("if") == "failure()"
@@ -150,9 +138,7 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
         None,
         "actions/upload-artifact",
     ]
-    source_snapshot_commands = [
-        step["run"] for step in source_snapshot_steps if "run" in step
-    ]
+    source_snapshot_commands = [step["run"] for step in source_snapshot_steps if "run" in step]
     assert len(source_snapshot_commands) == 1
     source_snapshot_command = source_snapshot_commands[0]
     assert "git archive" in source_snapshot_command
@@ -160,9 +146,7 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
     assert '>> "$GITHUB_OUTPUT"' in source_snapshot_command
     assert source_snapshot_steps[1]["id"] == "create-source"
     snapshot_uploads = [
-        step
-        for step in source_snapshot_steps
-        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        step for step in source_snapshot_steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     ]
     assert len(snapshot_uploads) == 1
     assert snapshot_uploads[0]["id"] == "upload-source"
@@ -186,9 +170,7 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
         None,
         "actions/upload-artifact",
     ]
-    artifact_build_commands = [
-        step["run"] for step in artifact_build_steps if "run" in step
-    ]
+    artifact_build_commands = [step["run"] for step in artifact_build_steps if "run" in step]
     assert all("test:pytest" not in command for command in artifact_build_commands)
     build_command = artifact_build_commands[-1]
     assert "python3 -m venv" in build_command
@@ -204,22 +186,14 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
     assert "test:prepare-wheelhouse" not in build_command
     assert build_command.index("sha256sum -c -") < build_command.index("tar -xzf")
     assert build_command.index("pip download") < build_command.index("exec env")
-    build_downloads = [
-        step
-        for step in artifact_build_steps
-        if action_name(step) == "actions/download-artifact"
-    ]
+    build_downloads = [step for step in artifact_build_steps if action_name(step) == "actions/download-artifact"]
     assert len(build_downloads) == 1
     assert build_downloads[0]["with"] == {
         "artifact-ids": "${{ needs.source-snapshot.outputs.artifact-id }}",
         "path": "dist/release-source",
         "merge-multiple": "true",
     }
-    build_uploads = [
-        step
-        for step in artifact_build_steps
-        if action_name(step) == "actions/upload-artifact"
-    ]
+    build_uploads = [step for step in artifact_build_steps if action_name(step) == "actions/upload-artifact"]
     assert len(build_uploads) == 1
     assert build_uploads[0]["id"] == "upload-candidate"
     assert build_uploads[0]["with"] == {
@@ -243,14 +217,10 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
         None,
     ]
     verify_downloads = [
-        step
-        for step in verify_steps
-        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        step for step in verify_steps if str(step.get("uses", "")).startswith("actions/download-artifact@")
     ]
     assert len(verify_downloads) == 2
-    assert {
-        tuple(sorted(download["with"].items())) for download in verify_downloads
-    } == {
+    assert {tuple(sorted(download["with"].items())) for download in verify_downloads} == {
         (
             ("artifact-ids", "${{ needs.artifact-build.outputs.artifact-id }}"),
             ("merge-multiple", "true"),
@@ -267,10 +237,7 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
         "test ! -e dist/release-source && test ! -L dist/release-source\n"
     )
     artifact_verify_commands = [step["run"] for step in verify_steps if "run" in step]
-    assert any(
-        "tests/packaging/network_guard.c" in command
-        for command in artifact_verify_commands
-    )
+    assert any("tests/packaging/network_guard.c" in command for command in artifact_verify_commands)
     assert any(
         '"$0" -m pytest tests/python tests/packaging' in command
         and '"$0" tests/packaging/smoke_artifacts.py' in command
@@ -281,42 +248,27 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
     assert verify_command.count('"$release_guard" sh -eu -c') == 1
     assert verify_command.count("exec env") == 1
     assert "python3 -m venv" in verify_command
-    tool_install = verify_command.split('"$tools_dir/bin/python" -m pip install', 1)[
-        1
-    ].split('mkdir -p "$frontend_tools"', 1)[0]
+    tool_install = verify_command.split('"$tools_dir/bin/python" -m pip install', 1)[1].split(
+        'mkdir -p "$frontend_tools"', 1
+    )[0]
     assert '"$source_dir"' not in tool_install
     assert "npm ci" in verify_command
-    assert (
-        'cp "$source_dir/package.json" "$source_dir/package-lock.json"'
-        in verify_command
-    )
+    assert 'cp "$source_dir/package.json" "$source_dir/package-lock.json"' in verify_command
     assert "--ignore-scripts" in verify_command
     assert '--cache "$npm_cache"' in verify_command
     assert '--prefix "$frontend_tools"' in verify_command
     assert 'PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers"' in verify_command
     assert "install --with-deps chromium" in verify_command
     assert 'KALEIDOSCOPE_NPM_CACHE="$npm_cache"' in verify_command
-    assert (
-        'KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers"' in verify_command
-    )
-    assert (
-        'ln -s "$frontend_tools/node_modules" "$source_dir/node_modules"'
-        in verify_command
-    )
+    assert 'KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers"' in verify_command
+    assert 'ln -s "$frontend_tools/node_modules" "$source_dir/node_modules"' in verify_command
     assert all("hatch build" not in command for command in artifact_verify_commands)
-    assert all(
-        "test:prepare-wheelhouse" not in command for command in artifact_verify_commands
-    )
+    assert all("test:prepare-wheelhouse" not in command for command in artifact_verify_commands)
     assert "run" in verify_steps[-1]
     assert "smoke_artifacts.py" in verify_command
+    assert not any(str(step.get("uses", "")).startswith("actions/upload-artifact@") for step in verify_steps)
     assert not any(
-        str(step.get("uses", "")).startswith("actions/upload-artifact@")
-        for step in verify_steps
-    )
-    assert not any(
-        action_name(step)
-        in {"actions/checkout", "actions/setup-python", "actions/setup-node"}
-        for step in verify_steps
+        action_name(step) in {"actions/checkout", "actions/setup-python", "actions/setup-node"} for step in verify_steps
     )
 
     artifact_job = jobs["artifacts"]
@@ -332,22 +284,14 @@ def test_ci_workflow_enforces_the_release_quality_gates() -> None:
         "actions/download-artifact",
         "actions/upload-artifact",
     ]
-    downloads = [
-        step
-        for step in artifact_steps
-        if str(step.get("uses", "")).startswith("actions/download-artifact@")
-    ]
+    downloads = [step for step in artifact_steps if str(step.get("uses", "")).startswith("actions/download-artifact@")]
     assert len(downloads) == 1
     assert downloads[0]["with"] == {
         "artifact-ids": "${{ needs.artifact-build.outputs.artifact-id }}",
         "path": "dist/release-candidate",
         "merge-multiple": "true",
     }
-    uploads = [
-        step
-        for step in artifact_steps
-        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
-    ]
+    uploads = [step for step in artifact_steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")]
     assert len(uploads) == 1
     assert uploads[0]["with"]["name"] == "distributions"
 

@@ -10,3 +10,5 @@ node_modules/
 playwright-report/
 test-results/
 tests/e2e/harness/frame.jpg
+.agents
+.github/agents
