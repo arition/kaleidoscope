@@ -77,13 +77,8 @@ def build_server_command(
 def redact_url(url: str) -> str:
     parsed = urllib.parse.urlsplit(url)
     query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    redacted_query = [
-        (name, "<redacted>" if name == "token" else value)
-        for name, value in query
-    ]
-    return urllib.parse.urlunsplit(
-        parsed._replace(query=urllib.parse.urlencode(redacted_query))
-    )
+    redacted_query = [(name, "<redacted>" if name == "token" else value) for name, value in query]
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(redacted_query)))
 
 
 def write_notebook(root: Path) -> Path:
@@ -136,9 +131,7 @@ def wait_for_server(
     status_url = f"{base_url}/api/status?token={token}"
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(
-                f"Jupyter server exited early:\n{server_log_tail(log_path, token)}"
-            )
+            raise RuntimeError(f"Jupyter server exited early:\n{server_log_tail(log_path, token)}")
         try:
             with urllib.request.urlopen(status_url, timeout=1) as response:
                 if response.status == 200:
@@ -146,8 +139,7 @@ def wait_for_server(
         except (OSError, urllib.error.URLError):
             time.sleep(0.1)
     raise RuntimeError(
-        f"Timed out waiting for {redact_url(status_url)}:\n"
-        f"{server_log_tail(log_path, token)}"
+        f"Timed out waiting for {redact_url(status_url)}:\n{server_log_tail(log_path, token)}"
     )
 
 

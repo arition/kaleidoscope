@@ -153,9 +153,9 @@ def interleave_rgb24_buffer(frame: RGB24Frame) -> bytes:
         output_start = row * output_row_size
         for plane, data in enumerate(planes):
             input_start = row * strides[plane]
-            interleaved[output_start + plane : output_start + output_row_size : 3] = (
-                data[input_start : input_start + frame.width]
-            )
+            interleaved[output_start + plane : output_start + output_row_size : 3] = data[
+                input_start : input_start + frame.width
+            ]
     return bytes(interleaved)
 
 
@@ -191,23 +191,19 @@ def _codec_operations() -> dict[str, Callable[[bytes, int, int, int], EncodedIma
         ),
     }
     if features.check("webp"):
-        operations["webp_lossy_method_0"] = (
-            lambda pixels, width, height, quality: encode_webp(
-                pixels,
-                width,
-                height,
-                quality,
-                lossless=False,
-            )
+        operations["webp_lossy_method_0"] = lambda pixels, width, height, quality: encode_webp(
+            pixels,
+            width,
+            height,
+            quality,
+            lossless=False,
         )
-        operations["webp_lossless_method_0"] = (
-            lambda pixels, width, height, quality: encode_webp(
-                pixels,
-                width,
-                height,
-                quality,
-                lossless=True,
-            )
+        operations["webp_lossless_method_0"] = lambda pixels, width, height, quality: encode_webp(
+            pixels,
+            width,
+            height,
+            quality,
+            lossless=True,
         )
     return operations
 
@@ -256,9 +252,7 @@ def _browser_fixture(
         "height": height,
         "source_format": source_format,
         "message": dict(message),
-        "buffers_base64": [
-            base64.b64encode(buffer).decode("ascii") for buffer in buffers
-        ],
+        "buffers_base64": [base64.b64encode(buffer).decode("ascii") for buffer in buffers],
     }
 
 
@@ -305,9 +299,7 @@ def run_microbenchmarks(
                     "raw": raw,
                     "summary": _metric_summary(raw),
                 }
-            resolution_interleave["plane_strides"] = [
-                frame.get_stride(plane) for plane in range(3)
-            ]
+            resolution_interleave["plane_strides"] = [frame.get_stride(plane) for plane in range(3)]
             interleave_results[resolution] = resolution_interleave
 
             resolution_codecs: JsonObject = {}
@@ -426,9 +418,7 @@ def _request_frame_set(
         "encode_barrier_ms": max(encode_values),
         "encode_total_ms": sum(encode_values),
         "member_completion_spread_ms": (
-            (max(encode_ends) - min(encode_ends)) * 1000
-            if len(encode_ends) > 1
-            else 0.0
+            (max(encode_ends) - min(encode_ends)) * 1000 if len(encode_ends) > 1 else 0.0
         ),
         "assembly_send_ms": max(0.0, (sent_at - max(encode_ends)) * 1000),
         "payload_bytes": float(sum(len(buffer) for buffer in buffers)),
@@ -492,9 +482,7 @@ def run_paced_playback(
     finished = time.perf_counter()
     with delivery_lock:
         completed = list(deliveries)
-    errors = [
-        message for _, message, _ in completed if message.get("type") != "frame_set"
-    ]
+    errors = [message for _, message, _ in completed if message.get("type") != "frame_set"]
     if errors:
         raise RuntimeError(f"Paced benchmark failed: {errors[0]!r}")
     frame_sets = [
@@ -506,9 +494,7 @@ def run_paced_playback(
         (sent_at - scheduled[cast(int, message["request_id"])]) * 1000
         for sent_at, message, _ in frame_sets
     ]
-    payload_bytes = [
-        float(sum(len(buffer) for buffer in buffers)) for _, _, buffers in frame_sets
-    ]
+    payload_bytes = [float(sum(len(buffer) for buffer in buffers)) for _, _, buffers in frame_sets]
     render_barrier_ms = [
         max(
             _number(frame["render_ms"])
@@ -525,9 +511,7 @@ def run_paced_playback(
     ]
     delivered_frames = len(frame_sets)
     raw: JsonObject = {
-        "delivered_request_ids": [
-            cast(int, message["request_id"]) for _, message, _ in frame_sets
-        ],
+        "delivered_request_ids": [cast(int, message["request_id"]) for _, message, _ in frame_sets],
         "lag_ms": lag_ms,
         "payload_bytes": payload_bytes,
         "render_barrier_ms": render_barrier_ms,
@@ -647,10 +631,7 @@ def run_scenario(
         for rate in playback_rates
     }
     rss_after_playback = process_rss_bytes()
-    warnings = {
-        str(clip.id): [warning.code for warning in clip.warnings]
-        for clip in config.clips
-    }
+    warnings = {str(clip.id): [warning.code for warning in clip.warnings] for clip in config.clips}
     result: JsonObject = {
         "scenario": {**asdict(scenario), "path": scenario.path},
         "settings": {
@@ -754,15 +735,11 @@ def run_cleanup_probe(*, iterations: int) -> JsonObject:
             "payload_bytes": payload_bytes,
         },
         "summary": {
-            "rss_after_close_bytes": (
-                summarize(rss_after_close) if rss_after_close else {}
-            ),
+            "rss_after_close_bytes": (summarize(rss_after_close) if rss_after_close else {}),
             "payload_bytes": summarize(payload_bytes),
         },
         "rss_growth_first_to_last_bytes": (
-            rss_after_close[-1] - rss_after_close[0]
-            if len(rss_after_close) >= 2
-            else 0.0
+            rss_after_close[-1] - rss_after_close[0] if len(rss_after_close) >= 2 else 0.0
         ),
         "rss_tail_spread_bytes": max(tail) - min(tail) if tail else 0.0,
     }
@@ -774,9 +751,7 @@ def _run_browser(
     warmup: int,
     samples: int,
 ) -> JsonObject:
-    with tempfile.TemporaryDirectory(
-        prefix="kaleidoscope-benchmark-"
-    ) as temp_directory:
+    with tempfile.TemporaryDirectory(prefix="kaleidoscope-benchmark-") as temp_directory:
         temp = Path(temp_directory)
         fixture_path = temp / "fixtures.json"
         bundle_path = temp / "browser.js"
@@ -824,18 +799,14 @@ def _run_browser(
         fixture["summary"] = _metric_summary(raw)
         cdp = cast(JsonObject, fixture["cdp"])
         measured_iterations = warmup + samples
-        cdp["task_duration_ms_per_iteration"] = (
-            float(cdp["task_duration_ms"]) / measured_iterations
-        )
+        cdp["task_duration_ms_per_iteration"] = float(cdp["task_duration_ms"]) / measured_iterations
         cdp["script_duration_ms_per_iteration"] = (
             float(cdp["script_duration_ms"]) / measured_iterations
         )
         before = cdp.get("js_heap_used_before_bytes")
         after = cdp.get("js_heap_used_after_bytes")
         cdp["js_heap_used_delta_bytes"] = (
-            float(after) - float(before)
-            if before is not None and after is not None
-            else None
+            float(after) - float(before) if before is not None and after is not None else None
         )
     result["comm_note"] = (
         "simulated_comm_copy_ms copies already-received ArrayBuffers in one Chromium "
@@ -923,9 +894,7 @@ def _recompute_release_metrics(results: JsonObject) -> None:
         before = cdp.get("js_heap_used_before_bytes")
         after = cdp.get("js_heap_used_after_bytes")
         cdp["js_heap_used_delta_bytes"] = (
-            _number(after) - _number(before)
-            if before is not None and after is not None
-            else None
+            _number(after) - _number(before) if before is not None and after is not None else None
         )
 
     scenarios = cast(JsonObject, results["scenarios"])
@@ -965,12 +934,9 @@ def _recompute_release_metrics(results: JsonObject) -> None:
                 and not isinstance(request_id, bool)
                 and 0 <= request_id < desired_frames
             }
-            raw_evidence_valid = (
-                len(valid_request_ids) == len(request_ids)
-                and all(
-                    len(cast(list[object], raw[name])) == len(request_ids)
-                    for name in delivery_sample_names
-                )
+            raw_evidence_valid = len(valid_request_ids) == len(request_ids) and all(
+                len(cast(list[object], raw[name])) == len(request_ids)
+                for name in delivery_sample_names
             )
             delivered_frames = len(valid_request_ids)
             payload_bytes = cast(list[float], raw["payload_bytes"])
@@ -1003,9 +969,7 @@ def _recompute_release_metrics(results: JsonObject) -> None:
     rss_after_close = cleanup_raw["rss_after_close_bytes"]
     tail = rss_after_close[len(rss_after_close) // 2 :]
     cleanup["rss_growth_first_to_last_bytes"] = (
-        rss_after_close[-1] - rss_after_close[0]
-        if len(rss_after_close) >= 2
-        else 0.0
+        rss_after_close[-1] - rss_after_close[0] if len(rss_after_close) >= 2 else 0.0
     )
     cleanup["rss_tail_spread_bytes"] = max(tail) - min(tail) if tail else 0.0
 
@@ -1052,21 +1016,13 @@ def _playback_viable(playback: JsonObject) -> bool:
     model_lag = cast(JsonObject, model["lag_ms"])
     return (
         playback.get("raw_evidence_valid") is True
-        and _number(playback["delivered_frames"])
-        / _number(playback["desired_frames"])
-        >= 0.9
-        and _number(model["delivered_frames"]) / _number(model["desired_frames"])
-        >= 0.9
-        and _number(backend_lag["p95"])
-        <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
-        and _number(backend_lag["max"])
-        <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
-        and _number(playback["drain_ms"])
-        <= frame_period_ms * PLAYBACK_DRAIN_TOLERANCE_FRAMES
-        and _number(model_lag["p95"])
-        <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
-        and _number(model_lag["max"])
-        <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
+        and _number(playback["delivered_frames"]) / _number(playback["desired_frames"]) >= 0.9
+        and _number(model["delivered_frames"]) / _number(model["desired_frames"]) >= 0.9
+        and _number(backend_lag["p95"]) <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
+        and _number(backend_lag["max"]) <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
+        and _number(playback["drain_ms"]) <= frame_period_ms * PLAYBACK_DRAIN_TOLERANCE_FRAMES
+        and _number(model_lag["p95"]) <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
+        and _number(model_lag["max"]) <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
     )
 
 
@@ -1077,14 +1033,14 @@ def _decision(results: JsonObject) -> JsonObject:
     micro = cast(JsonObject, results["microbenchmarks"])
     interleave = cast(JsonObject, micro["interleave"])["1280x720"]
     buffer_median = float(
-        cast(JsonObject, cast(JsonObject, interleave["buffer_only"])["summary"])[
-            "wall_ms"
-        ]["median"]
+        cast(JsonObject, cast(JsonObject, interleave["buffer_only"])["summary"])["wall_ms"][
+            "median"
+        ]
     )
     numpy_median = float(
-        cast(JsonObject, cast(JsonObject, interleave["numpy_2_4_3"])["summary"])[
-            "wall_ms"
-        ]["median"]
+        cast(JsonObject, cast(JsonObject, interleave["numpy_2_4_3"])["summary"])["wall_ms"][
+            "median"
+        ]
     )
     numpy_speedup = buffer_median / numpy_median
     numpy_savings_ms = buffer_median - numpy_median
@@ -1099,22 +1055,15 @@ def _decision(results: JsonObject) -> JsonObject:
         cast(JsonObject, scenarios["direct_2x_960x540"])["playback"]["24_fps"],
     )
     playback_viable = all(
-        _playback_viable(playback)
-        for playback in (direct_one_playback, direct_two_playback)
+        _playback_viable(playback) for playback in (direct_one_playback, direct_two_playback)
     )
-    latency_viable = all(
-        bool(cast(JsonObject, gate)["passed"]) for gate in gates.values()
-    )
+    latency_viable = all(bool(cast(JsonObject, gate)["passed"]) for gate in gates.values())
     cleanup = cast(JsonObject, results["cleanup_probe"])
-    cleanup_samples = cast(
-        list[object], cast(JsonObject, cleanup["raw"])["rss_after_close_bytes"]
-    )
+    cleanup_samples = cast(list[object], cast(JsonObject, cleanup["raw"])["rss_after_close_bytes"])
     cleanup_memory_viable = (
         len(cleanup_samples) >= 2
-        and _number(cleanup["rss_growth_first_to_last_bytes"])
-        <= CLEANUP_RSS_TOLERANCE_BYTES
-        and _number(cleanup["rss_tail_spread_bytes"])
-        <= CLEANUP_RSS_TOLERANCE_BYTES
+        and _number(cleanup["rss_growth_first_to_last_bytes"]) <= CLEANUP_RSS_TOLERANCE_BYTES
+        and _number(cleanup["rss_tail_spread_bytes"]) <= CLEANUP_RSS_TOLERANCE_BYTES
     )
     failed_gates = [
         name
@@ -1142,9 +1091,7 @@ def _decision(results: JsonObject) -> JsonObject:
         "numpy_runtime_dependency": keep_numpy,
         "numpy_720p_speedup": numpy_speedup,
         "numpy_720p_median_savings_ms": numpy_savings_ms,
-        "image_per_frame_transport": (
-            "retain" if transport_viable else "revise before T7"
-        ),
+        "image_per_frame_transport": ("retain" if transport_viable else "revise before T7"),
         "latency_targets_passed": latency_viable,
         "paced_playback_threshold_passed": playback_viable,
         "playback_p95_tolerance_frames": PLAYBACK_P95_TOLERANCE_FRAMES,
@@ -1357,16 +1304,10 @@ def render_report(
         "",
         "## Environment",
         "",
-        (
-            f"- CPU: {metadata['cpu_model']} "
-            f"({metadata['logical_cpu_count']} logical CPUs)"
-        ),
+        (f"- CPU: {metadata['cpu_model']} ({metadata['logical_cpu_count']} logical CPUs)"),
         f"- RAM: {float(metadata['system_memory_bytes']) / (1024**3):.1f} GiB",
         f"- Platform: {metadata['platform']}",
-        (
-            f"- Python: {metadata['python']}; Node: {metadata['node']}; "
-            f"npm: {metadata['npm']}"
-        ),
+        (f"- Python: {metadata['python']}; Node: {metadata['node']}; npm: {metadata['npm']}"),
         f"- Packages: `{json.dumps(metadata['packages'], sort_keys=True)}`",
         f"- Chromium: {browser['chromium_version']}",
         "",
@@ -1414,9 +1355,7 @@ def render_report(
 
     comparison = results.get("baseline_comparison")
     if isinstance(comparison, dict):
-        four_clip_comparison = cast(
-            JsonObject, comparison["direct_4x_640x360"]
-        )
+        four_clip_comparison = cast(JsonObject, comparison["direct_4x_640x360"])
         four_clip_note = (
             "The non-gated `direct_4x_640x360` scaling probe measured "
             f"{_format_ms(four_clip_comparison['browser_decode_p95_ms'])} ms browser "
@@ -1435,12 +1374,8 @@ def render_report(
         )
     else:
         four_clip = cast(JsonObject, scenarios["direct_4x_640x360"])
-        four_clip_summary = cast(
-            JsonObject, cast(JsonObject, four_clip["paused"])["summary"]
-        )
-        four_clip_complete = cast(
-            JsonObject, four_clip_summary["simulated_request_to_paint_ms"]
-        )
+        four_clip_summary = cast(JsonObject, cast(JsonObject, four_clip["paused"])["summary"])
+        four_clip_complete = cast(JsonObject, four_clip_summary["simulated_request_to_paint_ms"])
         four_clip_browser = cast(
             JsonObject,
             cast(
@@ -1492,8 +1427,7 @@ def render_report(
             "",
             "## Interleave",
             "",
-            "| Resolution | Buffer median ms | NumPy median ms | Buffer/NumPy "
-            "| Plane strides |",
+            "| Resolution | Buffer median ms | NumPy median ms | Buffer/NumPy | Plane strides |",
             "| --- | ---: | ---: | ---: | --- |",
         ]
     )
@@ -1585,9 +1519,7 @@ def render_report(
             playback = cast(JsonObject, playback)
             model = cast(JsonObject, playback["simulated_render_to_paint"])
             model_lag = cast(JsonObject, model["lag_ms"])
-            model_lag_p95 = (
-                _format_ms(model_lag["p95"]) if "p95" in model_lag else "n/a"
-            )
+            model_lag_p95 = _format_ms(model_lag["p95"]) if "p95" in model_lag else "n/a"
             lines.append(
                 f"| `{name}` | {float(playback['target_fps']):.0f} | "
                 f"{float(playback['delivered_fps']):.2f}/"
@@ -1621,8 +1553,7 @@ def render_report(
             "RSS is process-wide and includes VapourSynth/Pillow allocator retention. "
             "Chromium JS heap is collected separately in the raw JSON.",
             "",
-            "| Scenario | Before MiB | After setup MiB | After playback MiB "
-            "| After cleanup MiB |",
+            "| Scenario | Before MiB | After setup MiB | After playback MiB | After cleanup MiB |",
             "| --- | ---: | ---: | ---: | ---: |",
         ]
     )
@@ -1699,10 +1630,7 @@ def render_report(
                 f"- Interleave: **{decision['interleave']}**; NumPy runtime "
                 f"dependency: **{decision['numpy_runtime_dependency']}**."
             ),
-            (
-                "- Image-per-frame transport: "
-                f"**{decision['image_per_frame_transport']}**."
-            ),
+            (f"- Image-per-frame transport: **{decision['image_per_frame_transport']}**."),
             (
                 f"- Gate status: latency={decision['latency_targets_passed']}, "
                 "paced playback="
@@ -1729,10 +1657,7 @@ def render_report(
                 )
             ),
             "",
-            (
-                "Raw samples and all environment fields are in "
-                f"`{displayed_output_path}`."
-            ),
+            (f"Raw samples and all environment fields are in `{displayed_output_path}`."),
             "",
             "## Reproduce",
             "",
@@ -1752,9 +1677,7 @@ def render_report(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run the T6 Kaleidoscope pipeline benchmark."
-    )
+    parser = argparse.ArgumentParser(description="Run the T6 Kaleidoscope pipeline benchmark.")
     parser.add_argument(
         "--output",
         type=Path,
@@ -1816,9 +1739,7 @@ def main() -> int:
             "cleanup_iterations": args.cleanup_iterations,
             "cleanup_rss_tolerance_bytes": CLEANUP_RSS_TOLERANCE_BYTES,
             "quality": QUALITY,
-            "four_clip_resolution_note": (
-                "640x360 is a scaling probe, not an acceptance target."
-            ),
+            "four_clip_resolution_note": ("640x360 is a scaling probe, not an acceptance target."),
         },
     }
     microbenchmarks, codec_fixtures = run_microbenchmarks(
