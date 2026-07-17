@@ -7,6 +7,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -239,7 +240,7 @@ def test_sdist_is_offline_buildable_without_development_frontend_sources() -> No
     assert "npm_builder" not in build_configuration
 
 
-def test_frontend_assets_match_locked_source_build(tmp_path: Path) -> None:
+def test_frontend_assets_match_locked_source_build() -> None:
     lockfile = json.loads((ROOT / "package-lock.json").read_text())
     declared_version = lockfile["packages"][""]["devDependencies"]["esbuild"]
     locked_version = lockfile["packages"]["node_modules/esbuild"]["version"]
@@ -253,9 +254,12 @@ def test_frontend_assets_match_locked_source_build(tmp_path: Path) -> None:
         if not key.lower().startswith("npm_config_")
         and key not in {"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH"}
     }
+    npm_cache = os.environ.get("KALEIDOSCOPE_NPM_CACHE")
+    if npm_cache is not None:
+        environment["npm_config_cache"] = npm_cache
     with tempfile.TemporaryDirectory(
         prefix="kaleidoscope-frontend-toolchain-",
-        dir=tmp_path,
+        dir=ROOT,
     ) as temporary:
         toolchain = Path(temporary)
         for name in ("package.json", "package-lock.json"):
@@ -326,6 +330,82 @@ def test_frontend_assets_match_locked_source_build(tmp_path: Path) -> None:
         )
 
 
+def test_explicit_npm_cache_survives_private_runner_home(tmp_path: Path) -> None:
+    if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") == "1":
+        if os.environ.get("KALEIDOSCOPE_NPM_CACHE") is None:
+            pytest.skip("The active local guard has no explicit verifier npm cache.")
+        return
+
+    npm = shutil.which("npm")
+    assert npm is not None
+    npm_cache = tmp_path / "npm-cache"
+    seed_toolchain = tmp_path / "seed-toolchain"
+    seed_toolchain.mkdir()
+    for name in ("package.json", "package-lock.json"):
+        shutil.copy2(ROOT / name, seed_toolchain / name)
+    subprocess.run(
+        [
+            npm,
+            "ci",
+            "--cache",
+            str(npm_cache),
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+        ],
+        cwd=seed_toolchain,
+        check=True,
+    )
+    shutil.rmtree(seed_toolchain / "node_modules")
+
+    runner_root = tmp_path / "runner"
+    runner_work = runner_root / "work"
+    runner_temp = runner_work / "_temp"
+    actions = runner_work / "_actions"
+    tool_cache = runner_root / "tool-cache"
+    for directory in (runner_temp, actions, tool_cache):
+        directory.mkdir(parents=True)
+
+    guard = tmp_path / "network-guard"
+    subprocess.run(
+        [
+            "cc",
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-o",
+            str(guard),
+            str(PACKAGING / "network_guard.c"),
+        ],
+        check=True,
+    )
+    environment = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner_temp),
+        "RUNNER_TOOL_CACHE": str(tool_cache),
+        "RUNNER_WORKSPACE": str(runner_work / "vapoursynth-kaleidoscope"),
+        "KALEIDOSCOPE_NPM_CACHE": str(npm_cache),
+    }
+    subprocess.run(
+        [
+            str(guard),
+            sys.executable,
+            "-m",
+            "pytest",
+            (
+                "tests/packaging/test_artifacts.py::"
+                "test_frontend_assets_match_locked_source_build"
+            ),
+            "-q",
+        ],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
+
+
 def test_artifact_smoke_uses_fresh_offline_install_environments() -> None:
     smoke = (PACKAGING / "smoke_artifacts.py").read_text()
     preparation = (PACKAGING / "prepare_wheelhouse.py").read_text()
@@ -346,15 +426,99 @@ def test_artifact_smoke_uses_fresh_offline_install_environments() -> None:
     assert "smoke_installed_notebook.py" in smoke
     assert "smoke_installed_browser.py" in smoke
     assert "smoke_installed_browser.mjs" in smoke
-    assert "SECCOMP_MODE_FILTER" in (PACKAGING / "network_guard.c").read_text()
+    network_guard = (PACKAGING / "network_guard.c").read_text()
+    assert "SECCOMP_MODE_FILTER" in network_guard
+    assert "CLONE_NEWUSER" in network_guard
+    assert "CLONE_NEWNS" in network_guard
+    assert "CLONE_NEWNET" in network_guard
+    assert "CLONE_NEWPID" in network_guard
+    assert "KALEIDOSCOPE_NETWORK_NAMESPACE_ACTIVE" in network_guard
+    assert "scrub_environment" in network_guard
+    assert '"GITHUB_"' in network_guard
+    assert '"ACTIONS_"' in network_guard
     assert "run_guarded" in smoke
     assert "KALEIDOSCOPE_NETWORK_GUARD_ACTIVE" in smoke
+    assert "KALEIDOSCOPE_NETWORK_NAMESPACE_ACTIVE" in smoke
     assert '"LD_PRELOAD"' not in smoke
     assert '"download"' in preparation
     test_source = (PACKAGING / "test_artifacts.py").read_text()
     assert '"--offline"' in test_source
     forbidden_npm_option = "--prefer" + "-offline"
     assert f'"{forbidden_npm_option}"' not in test_source
+
+
+def test_network_guard_hides_runner_control_paths(tmp_path: Path) -> None:
+    if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") == "1":
+        pytest.skip("The active guard already owns the process mount namespace.")
+
+    runner_root = tmp_path / "runner"
+    runner_work = runner_root / "work"
+    runner_temp = runner_work / "_temp"
+    actions = runner_work / "_actions"
+    tool_cache = runner_root / "tool-cache"
+    for directory in (runner_temp, actions, tool_cache):
+        directory.mkdir(parents=True)
+        (directory / "host-marker").write_text("host")
+    npm_cache = tmp_path / "npm-cache"
+    playwright_browsers = tmp_path / "playwright-browsers"
+    for directory in (npm_cache, playwright_browsers):
+        directory.mkdir()
+        (directory / "tool-marker").write_text("available")
+
+    guard = tmp_path / "network-guard"
+    subprocess.run(
+        [
+            "cc",
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-o",
+            str(guard),
+            str(PACKAGING / "network_guard.c"),
+        ],
+        check=True,
+    )
+    environment = {
+        **os.environ,
+        "KALEIDOSCOPE_OUTER_PROCESS_MARKER": "must-not-cross-pid-namespace",
+        "RUNNER_TEMP": str(runner_temp),
+        "RUNNER_TOOL_CACHE": str(tool_cache),
+        "RUNNER_WORKSPACE": str(runner_work / "vapoursynth-kaleidoscope"),
+        "KALEIDOSCOPE_NPM_CACHE": str(npm_cache),
+        "KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH": str(playwright_browsers),
+        "KALEIDOSCOPE_REQUIRE_TOOL_MARKERS": "1",
+    }
+
+    launcher = """
+import os
+import subprocess
+import sys
+
+guard_command = sys.argv[1:]
+child_environment = dict(os.environ)
+child_environment.pop("KALEIDOSCOPE_OUTER_PROCESS_MARKER", None)
+raise SystemExit(subprocess.run(guard_command, env=child_environment).returncode)
+"""
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            launcher,
+            str(guard),
+            sys.executable,
+            str(PACKAGING / "smoke_network_blocked.py"),
+            "--require-pid-one",
+        ],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
+
+    assert (runner_temp / "host-marker").read_text() == "host"
+    assert (actions / "host-marker").read_text() == "host"
+    assert (tool_cache / "host-marker").read_text() == "host"
 
 
 def test_ipc_kernel_launcher_disables_subprocess_iopub_bridge(monkeypatch) -> None:
@@ -431,6 +595,40 @@ def test_wheelhouse_preparation_atomically_replaces_all_contents(
     assert {path.name for path in wheelhouse.iterdir()} == {
         preparation.MANIFEST_NAME,
         *expected_files,
+    }
+
+
+def test_wheelhouse_preparation_uses_prefetched_regular_wheels(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    preparation = load_wheelhouse_module()
+    dependency_source = tmp_path / "dependency-source"
+    dependency_source.mkdir()
+    dependency = dependency_source / "dependency-1.0-py3-none-any.whl"
+    dependency.write_bytes(b"dependency")
+    artifact = tmp_path / preparation.WHEEL_NAME
+    artifact.write_bytes(b"current artifact")
+
+    monkeypatch.setattr(preparation, "DIST", tmp_path)
+    monkeypatch.setattr(preparation, "WHEELHOUSE", tmp_path / "wheelhouse")
+    monkeypatch.setenv("KALEIDOSCOPE_WHEELHOUSE_SOURCE", str(dependency_source))
+    monkeypatch.setattr(
+        preparation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("prefetched mode must not run pip"),
+    )
+
+    preparation.main()
+
+    wheelhouse = preparation.WHEELHOUSE
+    manifest = json.loads((wheelhouse / preparation.MANIFEST_NAME).read_text())
+    assert manifest == {
+        "algorithm": "sha256",
+        "files": {
+            preparation.WHEEL_NAME: sha256(b"current artifact").hexdigest(),
+            dependency.name: sha256(b"dependency").hexdigest(),
+        },
     }
 
 
@@ -647,6 +845,40 @@ def test_artifact_smoke_discards_failed_install_environment(
         raise AssertionError("Expected the simulated install to fail")
 
     assert not environment.exists()
+
+
+def test_artifact_smoke_scrubs_inherited_socket_and_proxy_endpoints(
+    monkeypatch,
+) -> None:
+    smoke = load_artifact_smoke_module()
+    inherited = {
+        variable: f"inherited-{variable}"
+        for variable in smoke.SENSITIVE_ENVIRONMENT_VARIABLES
+    }
+    inherited.update(
+        {
+            "ACTIONS_RUNTIME_TOKEN": "runtime-token",
+            "GITHUB_ENV": "/tmp/github-env",
+            "GITHUB_OUTPUT": "/tmp/github-output",
+            "GITHUB_PATH": "/tmp/github-path",
+            "GITHUB_STEP_SUMMARY": "/tmp/github-summary",
+            "PATH": "/usr/bin",
+            "PIP_INDEX_URL": "https://example.invalid/simple",
+            "PYTHONPATH": "/tmp/injected",
+        }
+    )
+    monkeypatch.setattr(smoke.os, "environ", inherited)
+
+    environment = smoke.pip_environment()
+
+    assert environment["PATH"] == "/usr/bin"
+    assert environment["PIP_CONFIG_FILE"] == smoke.os.devnull
+    assert environment["PIP_DISABLE_PIP_VERSION_CHECK"] == "1"
+    assert environment["PIP_NO_INDEX"] == "1"
+    assert not smoke.SENSITIVE_ENVIRONMENT_VARIABLES & set(environment)
+    assert "PIP_INDEX_URL" not in environment
+    assert "PYTHONPATH" not in environment
+    assert not any(key.startswith(("ACTIONS_", "GITHUB_")) for key in environment)
 
 
 def test_artifact_smoke_entrypoint_preserves_unowned_build_state(

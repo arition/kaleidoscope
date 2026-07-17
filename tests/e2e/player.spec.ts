@@ -547,11 +547,13 @@ test("responsive desktop and fullscreen layouts remain framed", async ({ page })
       overflow: element.scrollWidth - element.clientWidth,
       width: bounds.width,
       height: bounds.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
     };
   });
   expect(fullscreenGeometry.overflow).toBeLessThanOrEqual(0);
-  expect(fullscreenGeometry.width).toBe(1280);
-  expect(fullscreenGeometry.height).toBe(800);
+  expect(fullscreenGeometry.width).toBe(fullscreenGeometry.viewportWidth);
+  expect(fullscreenGeometry.height).toBe(fullscreenGeometry.viewportHeight);
   await test.info().attach("fullscreen-player", {
     body: await page.screenshot(),
     contentType: "image/png",

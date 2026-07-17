@@ -106,6 +106,24 @@ def write_manifest(directory: Path, release_wheel: Path) -> None:
     sync_directory(directory)
 
 
+def copy_prefetched_wheels(
+    source: Path,
+    destination: Path,
+    release_wheel: Path,
+) -> None:
+    if not source.is_absolute() or source.is_symlink() or not source.is_dir():
+        raise RuntimeError(f"Expected prefetched wheel directory at {source}")
+    entries = sorted(source.iterdir())
+    if not entries or any(
+        entry.is_symlink() or not entry.is_file() or entry.suffix != ".whl"
+        for entry in entries
+    ):
+        raise RuntimeError("Prefetched dependencies must contain only wheel files")
+    for entry in entries:
+        shutil.copyfile(entry, destination / entry.name)
+    shutil.copyfile(release_wheel, destination / release_wheel.name)
+
+
 def exchange_directories(left: Path, right: Path) -> None:
     require_supported_host()
     library = ctypes.CDLL(None, use_errno=True)
@@ -208,27 +226,35 @@ def main() -> None:
     release_wheel = only_wheel()
     fresh_directory = Path(tempfile.mkdtemp(prefix=".wheelhouse-download-", dir=DIST))
     try:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "--isolated",
-                "download",
-                "--no-cache-dir",
-                "--dest",
-                str(fresh_directory),
-                "--only-binary=:all:",
-                "hatchling>=1.27",
-                "ipykernel>=7,<8",
-                "nbclient>=0.10,<0.11",
-                "nbformat>=5.10,<6",
-                str(release_wheel),
-            ],
-            cwd=ROOT,
-            env=pip_environment(),
-            check=True,
-        )
+        prefetched = os.environ.get("KALEIDOSCOPE_WHEELHOUSE_SOURCE")
+        if prefetched is None:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "--isolated",
+                    "download",
+                    "--no-cache-dir",
+                    "--dest",
+                    str(fresh_directory),
+                    "--only-binary=:all:",
+                    "hatchling==1.31.0",
+                    "ipykernel>=7,<8",
+                    "nbclient>=0.10,<0.11",
+                    "nbformat>=5.10,<6",
+                    str(release_wheel),
+                ],
+                cwd=ROOT,
+                env=pip_environment(),
+                check=True,
+            )
+        else:
+            copy_prefetched_wheels(
+                Path(prefetched),
+                fresh_directory,
+                release_wheel,
+            )
         write_manifest(fresh_directory, release_wheel)
     except BaseException:
         shutil.rmtree(fresh_directory, ignore_errors=True)

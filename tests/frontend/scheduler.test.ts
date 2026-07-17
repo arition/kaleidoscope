@@ -75,6 +75,20 @@ describe("PausedSeekScheduler", () => {
     ]);
   });
 
+  it("clamps non-finite exact seeks to timeline boundaries", () => {
+    const sent: unknown[] = [];
+    const scheduler = new PausedSeekScheduler({
+      sessionId: "session-1",
+      numFrames: 10,
+      clipIds: ["Source"],
+      send: (message) => sent.push(message),
+    });
+
+    expect(scheduler.requestExact(Number.NEGATIVE_INFINITY).frame).toBe(0);
+    expect(scheduler.requestExact(Number.POSITIVE_INFINITY).frame).toBe(9);
+    expect(sent).toMatchObject([{ frame: 0 }, { frame: 9 }]);
+  });
+
   it("coalesces scrub requests to the latest target", () => {
     let scheduled: FrameRequestCallback | undefined;
     const sent: unknown[] = [];

@@ -96,6 +96,34 @@ function createRawMeasurements(): Record<keyof BrowserMeasurement, number[]> {
   };
 }
 
+export function labelDescribesFrame(label: string, frame: number): boolean {
+  const marker = `frame ${frame}`;
+  return label.split(",").some((field) => field.trim() === marker);
+}
+
+export function assertFinalFrameLabels(
+  labels: string[],
+  frame: number,
+  expectedClipLabels: string[],
+): void {
+  const expectedCount = expectedClipLabels.length;
+  if (labels.length !== expectedCount) {
+    throw new Error(
+      `Atomic canvas replacement expected ${expectedCount} labels, received ${labels.length}.`,
+    );
+  }
+  if (new Set(labels).size !== labels.length) {
+    throw new Error("Atomic canvas replacement requires unique labels.");
+  }
+  if (labels.some((label) => !labelDescribesFrame(label, frame))) {
+    throw new Error("Atomic canvas replacement did not commit the final frame set.");
+  }
+  const clipLabels = labels.map((label) => label.split(",", 1)[0]?.trim() ?? "");
+  if (clipLabels.some((label, index) => label !== expectedClipLabels[index])) {
+    throw new Error("Atomic canvas replacement committed unexpected clip labels.");
+  }
+}
+
 async function runFixture(
   fixture: BrowserFixture,
   warmup: number,
@@ -192,9 +220,11 @@ async function runFixture(
     const finalLabels = [...view.canvases.values()].map(
       (canvas) => canvas.getAttribute("aria-label") ?? "",
     );
-    if (finalLabels.some((label) => !label.endsWith(`frame ${samples - 1}`))) {
-      throw new Error("Atomic canvas replacement did not commit the final frame set.");
-    }
+    assertFinalFrameLabels(
+      finalLabels,
+      samples - 1,
+      fixture.message.frames.map((frame) => String(frame.clip_id)),
+    );
     return { raw, committed_frames: committedFrames, final_labels: finalLabels };
   } finally {
     globalThis.createImageBitmap = originalCreateImageBitmap;

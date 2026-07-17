@@ -2,7 +2,34 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 
+import pytest
+
 from kaleidoscope.scheduler import FrameSetScheduler, ScheduledFrame
+
+
+def test_scheduler_requires_a_positive_in_flight_bound() -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        FrameSetScheduler(max_in_flight=0)
+
+
+def test_closed_scheduler_ignores_replacement_work() -> None:
+    submitted: list[str] = []
+    scheduler = FrameSetScheduler(max_in_flight=1)
+    scheduler.close()
+
+    scheduler.replace_pending(
+        [
+            ScheduledFrame(
+                fairness_key="Source",
+                submit=lambda: submitted.append("Source") or Future(),
+                completed=lambda _: None,
+                submission_failed=lambda _: None,
+            )
+        ]
+    )
+
+    assert submitted == []
+    assert scheduler.in_flight == 0
 
 
 def test_scheduler_submits_frame_set_members_fairly_within_the_bound() -> None:

@@ -27,6 +27,31 @@ NETWORK_PROBE_SOURCE = Path(__file__).with_name("network_probe.c")
 JAVASCRIPT = ROOT / "src/kaleidoscope/static/index.js"
 STYLESHEET = ROOT / "src/kaleidoscope/static/index.css"
 QUICKSTART = ROOT / "examples/quickstart.ipynb"
+SENSITIVE_ENVIRONMENT_VARIABLES = {
+    "ALL_PROXY",
+    "CI_JOB_JWT",
+    "CI_JOB_JWT_V2",
+    "CI_JOB_TOKEN",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DOCKER_HOST",
+    "GH_ENTERPRISE_TOKEN",
+    "GH_TOKEN",
+    "GIT_SSH_COMMAND",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NODE_AUTH_TOKEN",
+    "NO_PROXY",
+    "NPM_TOKEN",
+    "PYPI_API_TOKEN",
+    "SSH_AGENT_PID",
+    "SSH_AUTH_SOCK",
+    "TWINE_PASSWORD",
+    "TWINE_USERNAME",
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+}
 
 
 def artifact(name: str) -> Path:
@@ -42,7 +67,11 @@ def run(*command: str, cwd: Path, env: dict[str, str] | None = None) -> None:
 
 def pip_environment() -> dict[str, str]:
     environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("PIP_")
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PIP_")
+        and not key.startswith(("ACTIONS_", "GITHUB_"))
+        and key not in SENSITIVE_ENVIRONMENT_VARIABLES
     }
     for variable in ("PYTHONHOME", "PYTHONPATH"):
         environment.pop(variable, None)
@@ -51,11 +80,14 @@ def pip_environment() -> dict[str, str]:
             "PIP_CONFIG_FILE": os.devnull,
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PIP_NO_INDEX": "1",
-            "HTTP_PROXY": "http://127.0.0.1:9",
-            "HTTPS_PROXY": "http://127.0.0.1:9",
-            "NO_PROXY": "",
         }
     )
+    npm_cache = os.environ.get("KALEIDOSCOPE_NPM_CACHE")
+    if npm_cache is not None:
+        environment["npm_config_cache"] = npm_cache
+    playwright_browsers = os.environ.get("KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH")
+    if playwright_browsers is not None:
+        environment["PLAYWRIGHT_BROWSERS_PATH"] = playwright_browsers
     return environment
 
 
@@ -72,6 +104,8 @@ def file_hash(path: Path) -> str:
 def require_network_guard() -> None:
     if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") != "1":
         raise RuntimeError("Run artifact smoke through tests/packaging/network_guard.c")
+    if os.environ.get("KALEIDOSCOPE_NETWORK_NAMESPACE_ACTIVE") != "1":
+        raise RuntimeError("Artifact smoke is not inside the private namespace")
     try:
         descriptor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     except PermissionError:
@@ -164,6 +198,9 @@ def run_guarded(
     cwd: Path,
     env: dict[str, str] | None = None,
 ) -> None:
+    if os.environ.get("KALEIDOSCOPE_NETWORK_GUARD_ACTIVE") == "1":
+        run(*command, cwd=cwd, env=env)
+        return
     run(str(guard), *command, cwd=cwd, env=env)
 
 

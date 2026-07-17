@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-  "hatchling>=1.27",
+  "hatchling==1.31.0",
 ]
 build-backend = "hatchling.build"
 
@@ -19,6 +19,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Typing :: Typed",
 ]
 dependencies = [
@@ -53,14 +54,15 @@ exclude = ["/.gitignore"]
 skip-install = true
 dependencies = [
   "anywidget>=0.11,<0.12",
-  "hatchling>=1.27",
+  "hatchling==1.31.0",
   "ipykernel>=7,<8",
   "nbclient>=0.10,<0.11",
   "nbformat>=5.10,<6",
   "numpy>=2.4,<3",
   "Pillow>=12.1,<13",
-  "pytest>=8.3,<9",
-  "pytest-cov>=6,<7",
+  "pytest>=9.0.3,<10",
+  "pytest-cov>=7,<8",
+  "PyYAML>=6,<7",
   "VapourSynth>=77,<78",
 ]
 
@@ -69,10 +71,24 @@ PYTHONPATH = "src"
 
 [tool.hatch.envs.test.scripts]
 artifact-smoke = "python tests/packaging/smoke_artifacts.py"
+coverage = [
+  "python -m pytest tests/python --cov=src/kaleidoscope --cov-branch --cov-report=json:test-results/coverage/python.json --cov-report=term",
+  "python tests/packaging/check_branch_coverage.py test-results/coverage/python.json",
+]
 e2e-fixture = "python tests/e2e/generate_fixture.py"
 notebook-smoke = "python tests/packaging/smoke_notebook.py"
 prepare-wheelhouse = "python tests/packaging/prepare_wheelhouse.py"
 pytest = "python -m pytest {args:tests/python tests/packaging}"
+
+[tool.hatch.envs.host]
+dependencies = [
+  "ipykernel==7.3.0",
+  "jupyterlab==4.6.1",
+  "notebook==7.6.0",
+]
+
+[tool.hatch.envs.host.scripts]
+smoke = "python tests/e2e/smoke_hosts.py {args}"
 
 [tool.hatch.envs.lint]
 detached = true

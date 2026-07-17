@@ -44,6 +44,10 @@ type MetricSamples = dict[str, list[float]]
 
 ROOT = Path(__file__).resolve().parents[1]
 QUALITY = 80
+CLEANUP_RSS_TOLERANCE_BYTES = 16 * 1024 * 1024
+PLAYBACK_P95_TOLERANCE_FRAMES = 1.0
+PLAYBACK_MAX_TOLERANCE_FRAMES = 2.0
+PLAYBACK_DRAIN_TOLERANCE_FRAMES = 2.0
 vs = importlib.import_module("vapoursynth")
 
 
@@ -400,6 +404,11 @@ def _request_frame_set(
     cpu_ms = (time.process_time() - cpu_started) * 1000
     if message.get("type") != "frame_set":
         raise RuntimeError(f"Benchmark frame request failed: {message!r}")
+    session.ack_frame_set(
+        request_id=request_id,
+        generation=0,
+        outcome="painted",
+    )
     frames = cast(list[dict[str, object]], message["frames"])
     interleave_events, encode_events = probe.snapshot()
     if len(interleave_events) != len(clip_ids) or len(encode_events) != len(clip_ids):
@@ -441,6 +450,12 @@ def run_paced_playback(
     def send(message: dict[str, object], buffers: list[bytes]) -> None:
         with delivery_lock:
             deliveries.append((time.perf_counter(), message, buffers))
+        if message.get("type") == "frame_set":
+            session.ack_frame_set(
+                request_id=cast(int, message["request_id"]),
+                generation=cast(int, message["generation"]),
+                outcome="painted",
+            )
         if message.get("request_id") == desired_frames - 1:
             final_delivery.set()
 
@@ -890,7 +905,173 @@ def _threshold(
     }
 
 
+def _recompute_release_metrics(results: JsonObject) -> None:
+    micro = cast(JsonObject, results["microbenchmarks"])
+    for group_name in ("interleave", "codecs"):
+        group = cast(JsonObject, micro[group_name])
+        for resolution in group.values():
+            for measurement in cast(JsonObject, resolution).values():
+                if isinstance(measurement, dict) and "raw" in measurement:
+                    raw = cast(MetricSamples, measurement["raw"])
+                    measurement["summary"] = _metric_summary(raw)
+
+    browser = cast(JsonObject, results["browser"])
+    for fixture_value in cast(JsonObject, browser["fixtures"]).values():
+        fixture = cast(JsonObject, fixture_value)
+        fixture["summary"] = _metric_summary(cast(MetricSamples, fixture["raw"]))
+        cdp = cast(JsonObject, fixture["cdp"])
+        before = cdp.get("js_heap_used_before_bytes")
+        after = cdp.get("js_heap_used_after_bytes")
+        cdp["js_heap_used_delta_bytes"] = (
+            _number(after) - _number(before)
+            if before is not None and after is not None
+            else None
+        )
+
+    scenarios = cast(JsonObject, results["scenarios"])
+    _combine_pipeline_results(scenarios, browser)
+    for scenario_value in scenarios.values():
+        scenario = cast(JsonObject, scenario_value)
+        paused = cast(JsonObject, scenario["paused"])
+        paused_raw = cast(MetricSamples, paused["raw"])
+        paused["summary"] = _metric_summary(paused_raw)
+        service_times = paused_raw["simulated_request_to_paint_ms"]
+        for playback_value in cast(JsonObject, scenario["playback"]).values():
+            playback = cast(JsonObject, playback_value)
+            raw = cast(JsonObject, playback["raw"])
+            playback["summary"] = {
+                name: summarize(cast(list[float], raw[name]))
+                for name in (
+                    "lag_ms",
+                    "payload_bytes",
+                    "render_barrier_ms",
+                    "encode_barrier_ms",
+                )
+            }
+            target_fps = _number(playback["target_fps"])
+            duration_s = _number(playback["duration_s"])
+            desired_frames = max(1, math.floor(duration_s * target_fps))
+            request_ids = cast(list[object], raw["delivered_request_ids"])
+            delivery_sample_names = (
+                "lag_ms",
+                "payload_bytes",
+                "render_barrier_ms",
+                "encode_barrier_ms",
+            )
+            valid_request_ids = {
+                request_id
+                for request_id in request_ids
+                if isinstance(request_id, int)
+                and not isinstance(request_id, bool)
+                and 0 <= request_id < desired_frames
+            }
+            raw_evidence_valid = (
+                len(valid_request_ids) == len(request_ids)
+                and all(
+                    len(cast(list[object], raw[name])) == len(request_ids)
+                    for name in delivery_sample_names
+                )
+            )
+            delivered_frames = len(valid_request_ids)
+            payload_bytes = cast(list[float], raw["payload_bytes"])
+            playback.update(
+                {
+                    "raw_evidence_valid": raw_evidence_valid,
+                    "desired_frames": desired_frames,
+                    "delivered_frames": delivered_frames,
+                    "dropped_frames": desired_frames - delivered_frames,
+                    "delivered_fps": delivered_frames / duration_s,
+                    "backend_cpu_core_equivalents": (
+                        _number(playback["backend_cpu_ms"]) / (duration_s * 1000)
+                    ),
+                    "payload_megabits_per_second": (
+                        sum(payload_bytes) * 8 / duration_s / 1_000_000
+                    ),
+                    "simulated_render_to_paint": asdict(
+                        simulate_latest_wins_playback(
+                            service_times,
+                            target_fps=target_fps,
+                            duration_s=duration_s,
+                        )
+                    ),
+                }
+            )
+
+    cleanup = cast(JsonObject, results["cleanup_probe"])
+    cleanup_raw = cast(MetricSamples, cleanup["raw"])
+    cleanup["summary"] = _metric_summary(cleanup_raw)
+    rss_after_close = cleanup_raw["rss_after_close_bytes"]
+    tail = rss_after_close[len(rss_after_close) // 2 :]
+    cleanup["rss_growth_first_to_last_bytes"] = (
+        rss_after_close[-1] - rss_after_close[0]
+        if len(rss_after_close) >= 2
+        else 0.0
+    )
+    cleanup["rss_tail_spread_bytes"] = max(tail) - min(tail) if tail else 0.0
+
+    gates = cast(JsonObject, results["gates"])
+    gates.clear()
+    gates.update(
+        {
+            "one_720p": _threshold(
+                cast(JsonObject, scenarios["direct_1x_1280x720"]),
+                median_target_ms=150,
+                p95_target_ms=250,
+            ),
+            "two_540p": _threshold(
+                cast(JsonObject, scenarios["direct_2x_960x540"]),
+                median_target_ms=225,
+                p95_target_ms=350,
+            ),
+        }
+    )
+
+    comparison = results.get("baseline_comparison")
+    if isinstance(comparison, dict):
+        baseline_path = Path(cast(str, comparison["baseline_path"]))
+        absolute_baseline_path = (
+            baseline_path if baseline_path.is_absolute() else ROOT / baseline_path
+        )
+        baseline = cast(
+            JsonObject,
+            json.loads(absolute_baseline_path.read_text(encoding="utf-8")),
+        )
+        _recompute_release_metrics(baseline)
+        results["baseline_comparison"] = _baseline_comparison(
+            results,
+            baseline,
+            baseline_path=baseline_path,
+        )
+
+
+def _playback_viable(playback: JsonObject) -> bool:
+    target_fps = _number(playback["target_fps"])
+    frame_period_ms = 1000 / target_fps
+    backend_lag = cast(JsonObject, cast(JsonObject, playback["summary"])["lag_ms"])
+    model = cast(JsonObject, playback["simulated_render_to_paint"])
+    model_lag = cast(JsonObject, model["lag_ms"])
+    return (
+        playback.get("raw_evidence_valid") is True
+        and _number(playback["delivered_frames"])
+        / _number(playback["desired_frames"])
+        >= 0.9
+        and _number(model["delivered_frames"]) / _number(model["desired_frames"])
+        >= 0.9
+        and _number(backend_lag["p95"])
+        <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
+        and _number(backend_lag["max"])
+        <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
+        and _number(playback["drain_ms"])
+        <= frame_period_ms * PLAYBACK_DRAIN_TOLERANCE_FRAMES
+        and _number(model_lag["p95"])
+        <= frame_period_ms * PLAYBACK_P95_TOLERANCE_FRAMES
+        and _number(model_lag["max"])
+        <= frame_period_ms * PLAYBACK_MAX_TOLERANCE_FRAMES
+    )
+
+
 def _decision(results: JsonObject) -> JsonObject:
+    _recompute_release_metrics(results)
     scenarios = cast(JsonObject, results["scenarios"])
     gates = cast(JsonObject, results["gates"])
     micro = cast(JsonObject, results["microbenchmarks"])
@@ -918,20 +1099,33 @@ def _decision(results: JsonObject) -> JsonObject:
         cast(JsonObject, scenarios["direct_2x_960x540"])["playback"]["24_fps"],
     )
     playback_viable = all(
-        _number(playback["delivered_frames"]) / _number(playback["desired_frames"])
-        >= 0.9
-        and _number(
-            cast(JsonObject, playback["simulated_render_to_paint"])["delivered_frames"]
-        )
-        / _number(
-            cast(JsonObject, playback["simulated_render_to_paint"])["desired_frames"]
-        )
-        >= 0.9
+        _playback_viable(playback)
         for playback in (direct_one_playback, direct_two_playback)
     )
     latency_viable = all(
         bool(cast(JsonObject, gate)["passed"]) for gate in gates.values()
     )
+    cleanup = cast(JsonObject, results["cleanup_probe"])
+    cleanup_samples = cast(
+        list[object], cast(JsonObject, cleanup["raw"])["rss_after_close_bytes"]
+    )
+    cleanup_memory_viable = (
+        len(cleanup_samples) >= 2
+        and _number(cleanup["rss_growth_first_to_last_bytes"])
+        <= CLEANUP_RSS_TOLERANCE_BYTES
+        and _number(cleanup["rss_tail_spread_bytes"])
+        <= CLEANUP_RSS_TOLERANCE_BYTES
+    )
+    failed_gates = [
+        name
+        for name, passed in (
+            ("latency", latency_viable),
+            ("paced_playback", playback_viable),
+            ("cleanup_memory", cleanup_memory_viable),
+        )
+        if not passed
+    ]
+    benchmark_gate_passed = not failed_gates
     transport_viable = latency_viable and playback_viable
     return {
         "default_encoder": "Pillow JPEG",
@@ -953,7 +1147,13 @@ def _decision(results: JsonObject) -> JsonObject:
         ),
         "latency_targets_passed": latency_viable,
         "paced_playback_threshold_passed": playback_viable,
-        "human_gate": "G1 approval required before T7",
+        "playback_p95_tolerance_frames": PLAYBACK_P95_TOLERANCE_FRAMES,
+        "playback_max_tolerance_frames": PLAYBACK_MAX_TOLERANCE_FRAMES,
+        "playback_drain_tolerance_frames": PLAYBACK_DRAIN_TOLERANCE_FRAMES,
+        "cleanup_memory_threshold_passed": cleanup_memory_viable,
+        "cleanup_rss_tolerance_bytes": CLEANUP_RSS_TOLERANCE_BYTES,
+        "benchmark_gate_passed": benchmark_gate_passed,
+        "failed_gates": failed_gates,
         "rationale": (
             "JPEG 4:2:0 remains the default because it is the fastest measured "
             "encoder and avoids the larger 4:4:4 payload. Lossy and lossless WebP "
@@ -1001,6 +1201,7 @@ def environment_metadata() -> JsonObject:
     return {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "git_commit": _command_output(("git", "rev-parse", "HEAD")),
+        "git_index_tree": _command_output(("git", "write-tree")),
         "git_dirty": bool(_command_output(("git", "status", "--short"))),
         "platform": platform.platform(),
         "uname": platform.uname()._asdict(),
@@ -1042,19 +1243,88 @@ def _memory_mib(memory: Mapping[str, object], key: str) -> str:
     return "n/a" if value is None else f"{_number(value) / (1024**2):.1f}"
 
 
-def render_report(results: JsonObject) -> str:
+def _display_path(path: Path) -> str:
+    absolute_path = path if path.is_absolute() else ROOT / path
+    try:
+        return absolute_path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _baseline_comparison(
+    results: JsonObject,
+    baseline: JsonObject,
+    *,
+    baseline_path: Path,
+) -> JsonObject:
+    def metrics(source: JsonObject) -> tuple[float, float]:
+        scenarios = cast(JsonObject, source["scenarios"])
+        scenario = cast(JsonObject, scenarios["direct_4x_640x360"])
+        paused = cast(JsonObject, scenario["paused"])
+        summary = cast(JsonObject, paused["summary"])
+        complete = cast(JsonObject, summary["simulated_request_to_paint_ms"])
+        browser = cast(JsonObject, source["browser"])
+        fixtures = cast(JsonObject, browser["fixtures"])
+        fixture = cast(JsonObject, fixtures["direct_4x_640x360"])
+        fixture_summary = cast(JsonObject, fixture["summary"])
+        decode = cast(JsonObject, fixture_summary["decode_barrier_ms"])
+        return _number(decode["p95"]), _number(complete["p95"])
+
+    decode_p95, paint_p95 = metrics(results)
+    baseline_decode_p95, baseline_paint_p95 = metrics(baseline)
+    return {
+        "baseline_path": _display_path(baseline_path),
+        "direct_4x_640x360": {
+            "browser_decode_p95_ms": decode_p95,
+            "baseline_browser_decode_p95_ms": baseline_decode_p95,
+            "browser_decode_p95_delta_ms": decode_p95 - baseline_decode_p95,
+            "simulated_paint_p95_ms": paint_p95,
+            "baseline_simulated_paint_p95_ms": baseline_paint_p95,
+            "simulated_paint_p95_delta_ms": paint_p95 - baseline_paint_p95,
+        },
+    }
+
+
+def benchmark_exit_code(results: JsonObject) -> int:
+    decision = _decision(results)
+    return 0 if decision.get("benchmark_gate_passed") is True else 1
+
+
+def render_report(
+    results: JsonObject,
+    *,
+    report_label: str = "T6",
+    output_path: Path = Path("benchmarks/results/t6-pipeline.json"),
+    report_path: Path = Path("tasks/benchmark-report.md"),
+) -> str:
     metadata = cast(JsonObject, results["environment"])
     settings = cast(JsonObject, results["settings"])
     gates = cast(JsonObject, results["gates"])
     scenarios = cast(JsonObject, results["scenarios"])
     micro = cast(JsonObject, results["microbenchmarks"])
     browser = cast(JsonObject, results["browser"])
-    decision = cast(JsonObject, results["decision"])
+    decision = _decision(results)
+    displayed_output_path = _display_path(output_path)
+    displayed_report_path = _display_path(report_path)
     lines = [
-        "# T6 Pipeline Benchmark Report",
+        f"# {report_label} Pipeline Benchmark Report",
         "",
         f"Generated: {metadata['timestamp_utc']}",
         f"Commit: `{metadata['git_commit']}`",
+        *(
+            [f"Source tree: `{metadata['git_index_tree']}`"]
+            if metadata.get("git_index_tree")
+            else []
+        ),
+        *(
+            [
+                "Working tree dirty before/after measurement: "
+                f"`{metadata['git_dirty']}` / "
+                f"`{metadata['git_dirty_after_measurement']}`"
+            ]
+            if "git_dirty_after_measurement" in metadata
+            else []
+        ),
         "",
         "## Method",
         "",
@@ -1141,6 +1411,57 @@ def render_report(results: JsonObject) -> str:
             f"{_format_ms(complete['median'])}/{_format_ms(complete['p95'])} | "
             f"{_format_kib(payload['median'])} | {_format_ms(cpu['median'])} |"
         )
+
+    comparison = results.get("baseline_comparison")
+    if isinstance(comparison, dict):
+        four_clip_comparison = cast(
+            JsonObject, comparison["direct_4x_640x360"]
+        )
+        four_clip_note = (
+            "The non-gated `direct_4x_640x360` scaling probe measured "
+            f"{_format_ms(four_clip_comparison['browser_decode_p95_ms'])} ms browser "
+            "decode p95 versus the T6 baseline of "
+            f"{_format_ms(four_clip_comparison['baseline_browser_decode_p95_ms'])} "
+            "ms (delta "
+            f"{_number(four_clip_comparison['browser_decode_p95_delta_ms']):+.2f} "
+            "ms), and "
+            f"{_format_ms(four_clip_comparison['simulated_paint_p95_ms'])} ms "
+            "simulated paint p95 versus "
+            f"{_format_ms(four_clip_comparison['baseline_simulated_paint_p95_ms'])} "
+            "ms (delta "
+            f"{_number(four_clip_comparison['simulated_paint_p95_delta_ms']):+.2f} "
+            "ms). The required one- and two-clip cases remain the release acceptance "
+            "targets."
+        )
+    else:
+        four_clip = cast(JsonObject, scenarios["direct_4x_640x360"])
+        four_clip_summary = cast(
+            JsonObject, cast(JsonObject, four_clip["paused"])["summary"]
+        )
+        four_clip_complete = cast(
+            JsonObject, four_clip_summary["simulated_request_to_paint_ms"]
+        )
+        four_clip_browser = cast(
+            JsonObject,
+            cast(
+                JsonObject,
+                cast(JsonObject, browser["fixtures"])["direct_4x_640x360"],
+            )["summary"],
+        )
+        four_clip_decode = cast(JsonObject, four_clip_browser["decode_barrier_ms"])
+        four_clip_note = (
+            "The non-gated `direct_4x_640x360` scaling probe measured "
+            f"{_format_ms(four_clip_decode['p95'])} ms browser decode p95 and "
+            f"{_format_ms(four_clip_complete['p95'])} ms simulated paint p95. "
+            "The required one- and two-clip cases remain the release acceptance "
+            "targets."
+        )
+    lines.extend(
+        [
+            "",
+            four_clip_note,
+        ]
+    )
 
     lines.extend(
         [
@@ -1264,15 +1585,33 @@ def render_report(results: JsonObject) -> str:
             playback = cast(JsonObject, playback)
             model = cast(JsonObject, playback["simulated_render_to_paint"])
             model_lag = cast(JsonObject, model["lag_ms"])
+            model_lag_p95 = (
+                _format_ms(model_lag["p95"]) if "p95" in model_lag else "n/a"
+            )
             lines.append(
                 f"| `{name}` | {float(playback['target_fps']):.0f} | "
                 f"{float(playback['delivered_fps']):.2f}/"
                 f"{playback['dropped_frames']} | "
                 f"{float(model['delivered_fps']):.2f}/{model['dropped_frames']} | "
-                f"{_format_ms(model_lag['p95'])} | "
+                f"{model_lag_p95} | "
                 f"{float(playback['payload_megabits_per_second']):.2f} | "
                 f"{float(playback['backend_cpu_core_equivalents']):.2f} |"
             )
+
+    lines.extend(
+        [
+            "",
+            (
+                "Playback acceptance requires at least 90% backend and modeled "
+                "delivery, p95 lag <= "
+                f"{decision['playback_p95_tolerance_frames']:.0f} frame period, "
+                "maximum lag <= "
+                f"{decision['playback_max_tolerance_frames']:.0f} frame periods, "
+                "and backend drain <= "
+                f"{decision['playback_drain_tolerance_frames']:.0f} frame periods."
+            ),
+        ]
+    )
 
     lines.extend(
         [
@@ -1315,6 +1654,12 @@ def render_report(results: JsonObject) -> str:
                 f"{_number(cleanup['rss_growth_first_to_last_bytes']) / (1024**2):.1f} "
                 "MiB; second-half spread: "
                 f"{_number(cleanup['rss_tail_spread_bytes']) / (1024**2):.1f} MiB."
+            ),
+            (
+                "- Cleanup acceptance tolerance: at least two post-close samples, "
+                f"with growth and second-half spread each <= "
+                f"{_number(decision['cleanup_rss_tolerance_bytes']) / (1024**2):.0f} "
+                "MiB."
             ),
             "",
             "Browser JS heap after forced GC:",
@@ -1361,7 +1706,8 @@ def render_report(results: JsonObject) -> str:
             (
                 f"- Gate status: latency={decision['latency_targets_passed']}, "
                 "paced playback="
-                f"{decision['paced_playback_threshold_passed']}."
+                f"{decision['paced_playback_threshold_passed']}, cleanup memory="
+                f"{decision['cleanup_memory_threshold_passed']}."
             ),
             (
                 "- Real Jupyter comm latency remains a later host-integration "
@@ -1369,11 +1715,23 @@ def render_report(results: JsonObject) -> str:
                 "simulation."
             ),
             f"- Rationale: {decision['rationale']}",
-            f"- **{decision['human_gate']}**.",
+            (
+                "- **HOLD: benchmark gates failed: "
+                f"{', '.join(cast(list[str], decision['failed_gates']))}.**"
+                if not decision["benchmark_gate_passed"]
+                else (
+                    "- **G1 approval required before T7.**"
+                    if report_label == "T6"
+                    else (
+                        "- **Performance evidence supports G2 review; compatibility "
+                        "and final quality gates remain separate.**"
+                    )
+                )
+            ),
             "",
             (
                 "Raw samples and all environment fields are in "
-                "`benchmarks/results/t6-pipeline.json`."
+                f"`{displayed_output_path}`."
             ),
             "",
             "## Reproduce",
@@ -1381,7 +1739,11 @@ def render_report(results: JsonObject) -> str:
             "```bash",
             ".venv/bin/python -m pip install -e . -r benchmarks/requirements.txt",
             "npm ci",
-            "PYTHONPATH=src:. .venv/bin/python -m benchmarks.pipeline",
+            (
+                "PYTHONPATH=src:. .venv/bin/python -m benchmarks.pipeline "
+                f"--output {displayed_output_path} --report {displayed_report_path} "
+                f"--report-label {report_label}"
+            ),
             "```",
             "",
         ]
@@ -1403,6 +1765,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=ROOT / "tasks/benchmark-report.md",
     )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=ROOT / "benchmarks/results/t6-pipeline.json",
+    )
+    parser.add_argument("--report-label", default="T6")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--samples", type=int, default=30)
     parser.add_argument("--micro-warmup", type=int, default=3)
@@ -1413,7 +1781,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
     if args.smoke:
         args.warmup = 1
@@ -1446,6 +1814,7 @@ def main() -> None:
             "micro_samples": args.micro_samples,
             "playback_duration_s": args.playback_seconds,
             "cleanup_iterations": args.cleanup_iterations,
+            "cleanup_rss_tolerance_bytes": CLEANUP_RSS_TOLERANCE_BYTES,
             "quality": QUALITY,
             "four_clip_resolution_note": (
                 "640x360 is a scaling probe, not an acceptance target."
@@ -1492,20 +1861,39 @@ def main() -> None:
             p95_target_ms=350,
         ),
     }
+    if args.report_label != "T6" and args.baseline.is_file():
+        baseline = cast(
+            JsonObject,
+            json.loads(args.baseline.read_text(encoding="utf-8")),
+        )
+        results["baseline_comparison"] = _baseline_comparison(
+            results,
+            baseline,
+            baseline_path=args.baseline,
+        )
     results["decision"] = _decision(results)
-    results["environment"]["git_dirty_after_run"] = bool(
+    results["environment"]["git_dirty_after_measurement"] = bool(
         _command_output(("git", "status", "--short"))
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
-    args.report.write_text(render_report(results), encoding="utf-8")
+    args.report.write_text(
+        render_report(
+            results,
+            report_label=args.report_label,
+            output_path=args.output,
+            report_path=args.report,
+        ),
+        encoding="utf-8",
+    )
     print(f"Raw results: {args.output}")
     print(f"Report: {args.report}")
     print(json.dumps(results["gates"], indent=2))
     print(json.dumps(results["decision"], indent=2))
+    return benchmark_exit_code(results)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

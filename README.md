@@ -109,9 +109,8 @@ KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" .venv/bin/hatch run test:prepare-wheelh
 cc -std=c11 -O2 -Wall -Wextra -Werror \
     -o "$release_guard" tests/packaging/network_guard.c
 KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
-    "$release_guard" .venv/bin/hatch run test:pytest
-KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
-    "$release_guard" .venv/bin/hatch run test:artifact-smoke
+    "$release_guard" sh -eu -c \
+      '.venv/bin/hatch run test:pytest && .venv/bin/hatch run test:artifact-smoke'
 ```
 
 Frontend assets are committed into `src/kaleidoscope/static` so wheels and
@@ -122,8 +121,8 @@ artifact directory, so unrelated files are left untouched. The initial `npm ci`,
 artifact build, wheelhouse preparation, and network-guard compilation are the
 network-enabled preparation phase. The artifact pytest repeats `npm ci --offline`
 from the populated npm cache to prove the committed bundle comes from the
-lockfile toolchain. Both post-preparation commands start inside the inherited
-Linux seccomp filter. Pytest and artifact smoke therefore run their complete
+lockfile toolchain. Both post-preparation checks run beneath one inherited Linux
+seccomp filter. Pytest and artifact smoke therefore run their complete
 process trees with only Unix-domain `socket()` and `socketpair()` creation
 permitted; IPv4, IPv6, packet, netlink, x32, and `io_uring` network paths are
 denied.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 from concurrent.futures import Future
+from dataclasses import replace
 from fractions import Fraction
 from io import BytesIO
 from threading import Event, Thread
@@ -643,6 +644,63 @@ def test_generation_advance_retires_old_delivery_before_replacement_request() ->
         )
         == 1
     )
+
+
+def test_generation_advance_rejects_decrease_and_ignores_equal_or_closed() -> None:
+    node = FakeVideoNode()
+    session = PreviewSession(
+        session_id="session-1",
+        config=make_config(node),
+        send=lambda message, buffers: None,
+    )
+
+    session.advance_generation(2)
+    session.advance_generation(2)
+    with pytest.raises(ValueError, match="must not decrease"):
+        session.advance_generation(1)
+    session.close()
+    session.advance_generation(3)
+
+    assert session._last_generation == 2
+
+
+def test_frame_set_rejects_timeline_cardinality_and_preview_format() -> None:
+    node = FakeVideoNode()
+    config = make_config(node)
+    session = PreviewSession(
+        session_id="session-1",
+        config=config,
+        send=lambda message, buffers: None,
+    )
+
+    with pytest.raises(ValueError, match="outside the clip timeline"):
+        session.request_frame_set(
+            request_id=0,
+            generation=0,
+            frame=-1,
+            clip_ids=("Source",),
+        )
+    with pytest.raises(ValueError, match="between one and four clips"):
+        session.request_frame_set(
+            request_id=0,
+            generation=0,
+            frame=0,
+            clip_ids=(),
+        )
+
+    incompatible = replace(config.clips[0], preview_format="YUV420P8")
+    incompatible_session = PreviewSession(
+        session_id="session-2",
+        config=replace(config, clips=(incompatible,)),
+        send=lambda message, buffers: None,
+    )
+    with pytest.raises(ValueError, match="prepared as RGB24"):
+        incompatible_session.request_frame_set(
+            request_id=0,
+            generation=0,
+            frame=0,
+            clip_ids=("Source",),
+        )
 
 
 def test_generation_advance_discards_old_pending_but_preserves_delivery() -> None:

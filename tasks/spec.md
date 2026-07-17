@@ -1,6 +1,6 @@
 # Kaleidoscope: Real-Time VapourSynth Preview for Jupyter
 
-Status: G1 approved; Task 12 complete; Task 13 authorized
+Status: T13 assessed; Gate 2 HOLD pending release-security and host evidence
 Spec revision: 0.6 approved
 Research baseline: July 2026
 
@@ -781,6 +781,18 @@ Create a benchmark suite that records, but does not make noisy shared-runner tim
 - Resident memory/per-clip cache bytes over repeated seeks and clip-selection changes.
 - Cleanup after repeated widget construction/disposal.
 
+The release cleanup probe requires at least two post-close RSS samples. It passes
+when first-to-last RSS growth and second-half RSS spread are each no greater than
+16 MiB; larger movement is treated as a potential monotonic leak and holds the
+benchmark decision pending investigation.
+
+The required one-clip 30 fps and two-clip 24 fps playback probes must each
+deliver at least 90% of requested frames in both the backend run and the
+browser-inclusive latest-wins model. Backend and modeled p95 lag must remain no
+greater than one target frame period, their maximum lag must remain no greater
+than two frame periods, and backend drain after the playback horizon must remain
+no greater than two frame periods.
+
 Publish the benchmark machine, clips, settings, and raw percentile summary. The first implementation milestone is a pipeline spike; do not invest in full UI polish until it demonstrates the performance targets or produces a documented transport pivot.
 
 T6 publishes the summarized result in `tasks/benchmark-report.md` and raw samples in `benchmarks/results/t6-pipeline.json`. The measured recommendation is JPEG 4:2:0 at quality 80 as the default, caller-selectable lossy/lossless WebP, source-resolution preservation, NumPy interleave, and retention of MIME-typed image-per-frame transport, all pending G1 approval.
@@ -791,7 +803,13 @@ T6 publishes the summarized result in `tasks/benchmark-report.md` and raw sample
 - Require exact wheel and sdist member manifests, compare every source-managed file byte-for-byte, and verify every wheel `RECORD` hash and size.
 - Prepare a local dependency wheelhouse as a separate, explicitly networked phase.
 - Install each artifact sequentially in a fresh environment using isolated PEP 517 builds, `--no-index`, and the local wheelhouse.
-- Under a native inherited Linux process-tree guard that permits only Unix-domain `socket()` and `socketpair()` creation and denies other socket families, x32 syscall-number bypasses, and `io_uring`, import the installed package, execute the shipped notebook in a real IPC Jupyter kernel, and render exact installed ESM/CSS plus installed-backend frame bytes in Chromium.
+- Under a native inherited Linux process-tree guard, enter private user, mount,
+  and network namespaces; replace `/run` with a private tmpfs so host Docker,
+  container-runtime, D-Bus, and other service sockets are unavailable; then deny
+  non-Unix socket families, x32 syscall-number bypasses, and `io_uring` with
+  seccomp. Inside that boundary, import the installed package, execute the
+  shipped notebook in a real pathname-IPC Jupyter kernel, and render exact
+  installed ESM/CSS plus installed-backend frame bytes in Chromium.
 - Verify the notebook produces widget-view MIME outputs without persisted frame buffers, and verify Chromium paints single and two-output comparisons without external requests or console errors.
 - Export the staged Git index, rebuild wheel and sdist from that clean tree, and repeat exact artifact inspection plus installed wheel/sdist smoke tests before committing Task 12.
 

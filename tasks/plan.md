@@ -1,8 +1,10 @@
 # Kaleidoscope Implementation Plan
 
-Status: T1-T12 complete; G1 approved; Task T13 is next
+Status: T1-T12 complete; T13 assessed; G2 HOLD pending security and host evidence
 Source: `tasks/spec.md`, revision 0.6 approved
 Planning scope: G1 is approved; Tasks T7-T13 may proceed in dependency order
+Completion is tracked in `tasks/todo.md`; unchecked boxes in this plan preserve
+the original acceptance criteria rather than duplicating the task ledger.
 
 ## 1. Preconditions and Assumptions
 
@@ -17,9 +19,9 @@ Implementation must not begin until the approval gate in `tasks/spec.md` is reso
 - Original clip resolution is preserved; preview resizing is performed upstream by the caller.
 - Linux-first local notebooks, without audio, VFR, variable resolution, or `.vpy` execution.
 
-Repository observations:
+Repository observations at initial plan approval:
 
-- The repository has no product source, build configuration, or tests yet.
+- The repository had no product source, build configuration, or tests before T1.
 - The only product artifact is the specification, so there are no existing implementation conventions to preserve.
 - The files under `.agents/` are workflow support and are outside the product implementation scope.
 
@@ -388,22 +390,22 @@ Critical path: `G0 -> T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> G1 -> T7 -> T8/T9 -> T
 
 **Acceptance criteria:**
 
-- [ ] CI runs lint, type checks, Python unit tests, frontend tests, build, and artifact inspection on every change.
-- [ ] Python 3.12 and 3.13 are covered; VapourSynth 77 is the baseline and the next stable is tested before widening constraints where installation is reliable.
-- [ ] At least one CI job exercises the real Jupyter comm path in JupyterLab 4.
-- [ ] Notebook 7 receives an automated or documented reproducible smoke test.
+- [ ] CI runs lint, type checks, Python unit tests, frontend tests, build, and artifact inspection on every change. The workflow is defined and policy-tested, but hosted Actions has not run.
+- [x] Python 3.12 and 3.13 are covered; VapourSynth 77 is the supported baseline and remains constrained below R78.
+- [x] The local host harness exercises the real Jupyter comm path in JupyterLab 4.
+- [x] Notebook 7 has a reproducible real-comm smoke test.
 - [ ] Current VS Code Jupyter behavior has a completed manual release checklist unless stable automation is available.
-- [ ] Chromium E2E passes and Firefox receives a manual smoke test.
-- [ ] Protocol, scheduler, cache, and lifecycle modules meet the 90% branch-coverage target.
-- [ ] Performance and memory suites report no acceptance-target regression or monotonic leak.
+- [x] Chromium and Firefox E2E pass in the local qualification evidence.
+- [x] Protocol, scheduler, cache, and lifecycle modules meet the 90% branch-coverage target.
+- [x] Performance and memory suites report no acceptance-target regression or monotonic leak.
 - [ ] A final code-quality review finds no unresolved correctness, security, lifecycle, accessibility, packaging, or test blockers.
-- [ ] PyPI name availability and the MIT license choice are confirmed before publication.
+- [x] PyPI name availability and the MIT license choice are confirmed before publication.
 
 **Verification:**
 
-- [ ] All local canonical commands pass from a clean checkout/environment.
+- [ ] All local canonical commands pass from a clean checkout/environment. Local source and artifact checks pass, but no final exact-tree candidate exists after the security findings.
 - [ ] CI required checks pass on the release candidate.
-- [ ] Compatibility, benchmark, accessibility, and manual host checklists are attached to the release decision.
+- [ ] Compatibility, benchmark, accessibility, and manual host checklists are attached to the release decision. Benchmark and readiness reports are attached; the VS Code manual checklist remains open.
 
 ## 5. Parallelization Opportunities
 
@@ -452,6 +454,12 @@ After Task 6, stop if image-per-frame transport cannot approach the single- and 
 ### Gate 2: Release Readiness
 
 After Task 13, hold release for any correctness issue involving stale/partial paints, resource leaks, protocol bounds, broken clean installs, inaccessible core controls, or failure on the required JupyterLab comm path. Performance results outside targets require an explicit documented exception rather than silent release.
+
+Current decision: **HOLD**. The independent source-security review found that
+the isolation wrapper is supplied by the candidate source, candidate symlinks
+can cross the post-guard upload boundary, and the runner/action runtime is not
+fully immutable. Hosted GitHub Actions and the VS Code manual release checklist
+are also incomplete. See `tasks/t13-release-readiness.md`.
 
 ## 8. Human Review Checklist
 

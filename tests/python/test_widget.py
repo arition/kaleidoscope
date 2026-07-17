@@ -113,6 +113,94 @@ def test_widget_sends_metadata_after_valid_ready(monkeypatch: Any) -> None:
     assert widget.status == "ready"
 
 
+def test_closed_widget_ignores_late_malformed_frontend_messages(
+    monkeypatch: Any,
+) -> None:
+    sent, make_widget = capture_messages(monkeypatch)
+    widget = make_widget()
+    widget.close()
+
+    widget._handle_custom_message(widget, {}, [])
+
+    assert sent == []
+    assert widget.status == "closed"
+
+
+def test_widget_rejects_messages_for_an_unknown_session(monkeypatch: Any) -> None:
+    sent, make_widget = capture_messages(monkeypatch)
+    widget = make_widget()
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "ready",
+            "session_id": "other-session",
+            "capabilities": {"image_bitmap": True, "webp": True},
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert sent[-1]["message"] == "Frontend message has an unknown session."
+
+
+def test_ready_widget_rejects_frame_requests_without_a_session(
+    monkeypatch: Any,
+) -> None:
+    sent, make_widget = capture_messages(monkeypatch)
+    widget = make_widget()
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "request_frame_set",
+            "session_id": "session-1",
+            "request_id": 0,
+            "generation": 0,
+            "frame": 0,
+            "clip_ids": ["Source"],
+            "reason": "seek",
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert sent[-1]["message"] == (
+        "Frame requests require an initialized preview session."
+    )
+
+
+def test_widget_rejects_comparison_views_without_clip_metadata(
+    monkeypatch: Any,
+) -> None:
+    sent, make_widget = capture_messages(monkeypatch)
+    widget = make_widget()
+    widget._session = FakeSession()
+    widget._frontend_state = "ready"
+
+    widget._handle_custom_message(
+        widget,
+        {
+            "protocol": 1,
+            "type": "set_view",
+            "session_id": "session-1",
+            "generation": 1,
+            "mode": "single",
+            "clip_ids": ["Source"],
+            "overlay_opacity": 0.5,
+        },
+        [],
+    )
+
+    assert widget.status == "error"
+    assert sent[-1]["message"] == (
+        "Comparison views require initialized clip metadata."
+    )
+
+
 def test_widget_metadata_includes_autoplay(monkeypatch: Any) -> None:
     sent: list[dict[str, object]] = []
     session = FakeSession()

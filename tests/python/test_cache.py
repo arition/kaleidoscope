@@ -1,6 +1,34 @@
 from __future__ import annotations
 
+import pytest
+
 from kaleidoscope.cache import ByteBoundedLRU
+
+
+@pytest.mark.parametrize(
+    ("max_entries", "max_bytes"),
+    [(-1, 1), (1, -1)],
+)
+def test_cache_rejects_negative_bounds(max_entries: int, max_bytes: int) -> None:
+    with pytest.raises(ValueError, match="must not be negative"):
+        ByteBoundedLRU[str, bytes](max_entries=max_entries, max_bytes=max_bytes)
+
+
+def test_cache_rejects_negative_entry_sizes() -> None:
+    cache = ByteBoundedLRU[str, bytes](max_entries=1, max_bytes=1)
+
+    with pytest.raises(ValueError, match="must not be negative"):
+        cache.put("frame", b"", -1)
+
+
+def test_replacing_an_entry_updates_the_byte_budget() -> None:
+    cache = ByteBoundedLRU[str, bytes](max_entries=2, max_bytes=5)
+    cache.put("frame", b"old", 3)
+    cache.put("frame", b"new!", 4)
+    cache.put("other", b"x", 1)
+
+    assert cache.get("frame") == b"new!"
+    assert cache.get("other") == b"x"
 
 
 def test_cache_evicts_least_recently_used_entry_by_count() -> None:

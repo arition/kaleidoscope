@@ -32,6 +32,150 @@ describe("widget render", () => {
     ]);
   });
 
+  it("renders a protocol error when the model has no session identifier", () => {
+    const model = new FakeModel("");
+    const element = document.createElement("div");
+
+    render({
+      model,
+      el: element,
+      signal: new AbortController().signal,
+    });
+
+    expect(element.textContent).toContain("missing session identifier");
+    expect(model.sent).toEqual([]);
+  });
+
+  it("falls back to frame zero when the durable model frame is invalid", () => {
+    const model = new FakeModel();
+    model.current_frame = Number.NaN;
+    const element = document.createElement("div");
+
+    render({
+      model,
+      el: element,
+      signal: new AbortController().signal,
+    });
+    model.emit({
+      protocol: 1,
+      type: "metadata",
+      session_id: "session-1",
+      status: "initialized",
+      num_frames: 10,
+      fps_num: 24,
+      fps_den: 1,
+      mode: "single",
+      active_clip_ids: ["Source"],
+      overlay_opacity: 0.5,
+      max_visible_clips: 1,
+      autoplay: false,
+      clips: [
+        {
+          id: "Source",
+          label: "Source",
+          source_format: "RGB24",
+          source_width: 1,
+          source_height: 1,
+          output_width: 1,
+          output_height: 1,
+          warnings: [],
+        },
+      ],
+    });
+
+    expect(model.sent).toContainEqual(
+      expect.objectContaining({ type: "request_frame_set", frame: 0 }),
+    );
+  });
+
+  it("does not close a backend comm that is already unavailable", () => {
+    const model = new FakeModel();
+    model.comm_live = false;
+    const controller = new AbortController();
+
+    render({
+      model,
+      el: document.createElement("div"),
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    expect(
+      model.sent.filter(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "close",
+      ),
+    ).toEqual([]);
+  });
+
+  it("ignores comm-live notifications while the comm remains available", () => {
+    const model = new FakeModel();
+    const element = document.createElement("div");
+
+    render({
+      model,
+      el: element,
+      signal: new AbortController().signal,
+    });
+    model.emitEvent("comm_live_update");
+
+    expect(element.querySelector("[role='status']")?.textContent).toBe(
+      "Initializing Kaleidoscope...",
+    );
+  });
+
+  it("suppresses an asynchronous ready message after the view aborts", async () => {
+    let resolveProbe: (bitmap: ImageBitmap) => void = () => {};
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(
+        () =>
+          new Promise<ImageBitmap>((resolve) => {
+            resolveProbe = resolve;
+          }),
+      ),
+    );
+    const model = new FakeModel();
+    const controller = new AbortController();
+
+    render({
+      model,
+      el: document.createElement("div"),
+      signal: controller.signal,
+    });
+    controller.abort();
+    resolveProbe({ close: vi.fn() } as unknown as ImageBitmap);
+    await vi.waitFor(() =>
+      expect(
+        model.sent.filter(
+          (message) =>
+            typeof message === "object" &&
+            message !== null &&
+            "type" in message &&
+            message.type === "ready",
+        ),
+      ).toEqual([]),
+    );
+  });
+
+  it("does not activate a view whose signal was already aborted", () => {
+    const model = new FakeModel();
+    const controller = new AbortController();
+    controller.abort();
+
+    render({
+      model,
+      el: document.createElement("div"),
+      signal: controller.signal,
+    });
+
+    expect(model.sent).toEqual([]);
+    expect(model.order).not.toContain("on:msg:custom");
+  });
+
   it("reports WebP support after decoding through createImageBitmap", async () => {
     const close = vi.fn();
     const createImageBitmap = vi.fn().mockResolvedValue({ close });

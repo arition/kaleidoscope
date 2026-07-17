@@ -1,0 +1,298 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install Hatch
+        run: python -m pip install "hatch==1.17.1"
+      - name: Lint
+        run: hatch run lint:check
+      - name: Type check
+        run: hatch run types:check
+      - name: Python tests
+        run: hatch run test:pytest tests/python
+      - name: Branch coverage
+        run: hatch run test:coverage
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test -- --run
+      - name: Branch coverage
+        run: npm run test:coverage
+      - name: Build
+        run: npm run build
+      - name: Verify committed assets
+        run: git diff --exit-code -- src/kaleidoscope/static
+
+  browser:
+    name: Browser ${{ matrix.browser }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Hatch
+        run: python -m pip install "hatch==1.17.1"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Browser tests
+        run: npm run test:e2e -- --project=${{ matrix.browser }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: warn
+
+  hosts:
+    name: Host ${{ matrix.host }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [jupyterlab, notebook]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install tools
+        run: |
+          python -m pip install "hatch==1.17.1"
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Real Jupyter comm smoke
+        run: hatch run host:smoke -- ${{ matrix.host }}
+
+  source-snapshot:
+    name: Snapshot release source
+    runs-on: ubuntu-24.04
+    needs: [python, frontend, browser, hosts]
+    outputs:
+      artifact-id: ${{ steps.upload-source.outputs.artifact-id }}
+      sha256: ${{ steps.create-source.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Create source archive
+        id: create-source
+        run: |
+          source_dir="dist/release-source"
+          mkdir -p "$source_dir"
+          git archive --format=tar.gz --output="$source_dir/source.tar.gz" HEAD
+          printf 'sha256=%s\n' "$(sha256sum "$source_dir/source.tar.gz" | cut -d' ' -f1)" \
+            >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: upload-source
+        with:
+          name: release-source
+          path: dist/release-source/source.tar.gz
+          if-no-files-found: error
+
+  artifact-build:
+    name: Build release candidate
+    runs-on: ubuntu-24.04
+    needs: source-snapshot
+    outputs:
+      artifact-id: ${{ steps.upload-candidate.outputs.artifact-id }}
+    steps:
+      - name: Require empty build destinations
+        run: |
+          test ! -e dist/release-candidate && test ! -L dist/release-candidate
+          test ! -e dist/release-source && test ! -L dist/release-source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.source-snapshot.outputs.artifact-id }}
+          path: dist/release-source
+          merge-multiple: true
+      - name: Build and prepare release
+        run: |
+          release_dir="$PWD/dist/release-candidate"
+          source_dir="$PWD/dist/release-source-tree"
+          tools_dir="$PWD/dist/build-tools"
+          wheelhouse_source="$PWD/dist/prefetched-wheelhouse"
+          release_guard="$PWD/dist/release-build-guard"
+          printf '%s  %s\n' \
+            '${{ needs.source-snapshot.outputs.sha256 }}' \
+            dist/release-source/source.tar.gz | sha256sum -c -
+          mkdir -p "$source_dir"
+          tar -xzf dist/release-source/source.tar.gz -C "$source_dir"
+          python3 -m venv "$tools_dir"
+          "$tools_dir/bin/python" -m pip install "hatchling==1.31.0"
+          "$tools_dir/bin/python" -m pip download \
+            --only-binary=:all: \
+            --dest "$wheelhouse_source" \
+            "anywidget>=0.11,<0.12" \
+            "hatchling==1.31.0" \
+            "ipykernel>=7,<8" \
+            "nbclient>=0.10,<0.11" \
+            "nbformat>=5.10,<6" \
+            "numpy>=2.4,<3" \
+            "Pillow>=12.1,<13" \
+            "traitlets>=5.15,<6" \
+            "VapourSynth>=77,<78"
+          cd "$source_dir"
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+            -o "$release_guard" tests/packaging/network_guard.c
+          exec env \
+            KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
+            KALEIDOSCOPE_WHEELHOUSE_SOURCE="$wheelhouse_source" \
+            "$release_guard" sh -eu -c \
+              '"$0" -m hatchling build --directory "$1" && \
+               "$0" tests/packaging/prepare_wheelhouse.py' \
+              "$tools_dir/bin/python" \
+              "$release_dir"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: upload-candidate
+        with:
+          name: release-candidate
+          path: dist/release-candidate/
+          if-no-files-found: error
+
+  artifact-verify:
+    name: Verify release candidate
+    runs-on: ubuntu-24.04
+    needs: [source-snapshot, artifact-build]
+    steps:
+      - name: Require empty candidate destination
+        run: |
+          test ! -e dist/release-candidate && test ! -L dist/release-candidate
+          test ! -e dist/release-source && test ! -L dist/release-source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.artifact-build.outputs.artifact-id }}
+          path: dist/release-candidate
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.source-snapshot.outputs.artifact-id }}
+          path: dist/release-source
+          merge-multiple: true
+      - name: Verify release offline
+        run: |
+          release_dir="$PWD/dist/release-candidate"
+          source_dir="$PWD/dist/release-source-tree"
+          tools_dir="$PWD/dist/release-tools"
+          frontend_tools="$tools_dir/frontend"
+          npm_cache="$tools_dir/npm-cache"
+          playwright_browsers="$tools_dir/playwright-browsers"
+          release_guard="$PWD/dist/release-network-guard"
+          printf '%s  %s\n' \
+            '${{ needs.source-snapshot.outputs.sha256 }}' \
+            dist/release-source/source.tar.gz | sha256sum -c -
+          mkdir -p "$source_dir"
+          tar -xzf dist/release-source/source.tar.gz -C "$source_dir"
+          python3 -m venv "$tools_dir"
+          "$tools_dir/bin/python" -m pip install \
+            "anywidget==0.11.0" \
+            "ipykernel>=7,<8" \
+            "nbclient>=0.10,<0.11" \
+            "nbformat>=5.10,<6" \
+            "numpy>=2.4,<3" \
+            "Pillow>=12.1,<13" \
+            "pytest>=9.0.3,<10" \
+            "pytest-cov>=7,<8" \
+            "PyYAML>=6,<7" \
+            "VapourSynth>=77,<78"
+          mkdir -p "$frontend_tools" "$npm_cache" "$playwright_browsers"
+          cp "$source_dir/package.json" "$source_dir/package-lock.json" \
+            "$frontend_tools/"
+          npm ci \
+            --prefix "$frontend_tools" \
+            --cache "$npm_cache" \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund
+          PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
+            "$frontend_tools/node_modules/.bin/playwright" \
+            install --with-deps chromium
+          ln -s "$frontend_tools/node_modules" "$source_dir/node_modules"
+          cd "$source_dir"
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+            -o "$release_guard" tests/packaging/network_guard.c
+          exec env \
+            PYTHONPATH="$source_dir/src:$source_dir" \
+            KALEIDOSCOPE_ARTIFACT_DIR="$release_dir" \
+            KALEIDOSCOPE_NPM_CACHE="$npm_cache" \
+            KALEIDOSCOPE_PLAYWRIGHT_BROWSERS_PATH="$playwright_browsers" \
+            "$release_guard" sh -eu -c \
+              '"$0" -m pytest tests/python tests/packaging && \
+               "$0" tests/packaging/smoke_artifacts.py' \
+              "$tools_dir/bin/python"
+
+  artifacts:
+    name: Publish verified distributions
+    runs-on: ubuntu-24.04
+    needs: [artifact-build, artifact-verify]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.artifact-build.outputs.artifact-id }}
+          path: dist/release-candidate
+          merge-multiple: true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: distributions
+          path: |
+            dist/release-candidate/*.whl
+            dist/release-candidate/*.tar.gz
+          if-no-files-found: error

@@ -56,6 +56,11 @@ def test_parse_frontend_message_rejects_incompatible_protocol() -> None:
     assert error.value.code == "protocol_mismatch"
 
 
+def test_parse_frontend_message_rejects_non_object_payloads() -> None:
+    with pytest.raises(ProtocolError, match="must be an object"):
+        parse_frontend_message([])
+
+
 def test_parse_frontend_message_accepts_a_single_frame_set_request() -> None:
     message = parse_frontend_message(
         {

@@ -1,6 +1,6 @@
 # Kaleidoscope Task List
 
-Status: G1 approved; T12 complete; T13 is next
+Status: T13 assessed; G2 HOLD pending security remediation and host evidence
 Source plan: `tasks/plan.md`  
 Source spec: `tasks/spec.md`, revision 0.6 approved
 
@@ -22,7 +22,11 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Decide whether NumPy remains a runtime dependency.
   - [x] Confirm image-per-frame transport remains viable or revise the spec.
 - [ ] **G2 - Approve release readiness after T13**
-  - [ ] Review compatibility, benchmark, memory, accessibility, and quality reports.
+  - [x] Review compatibility, benchmark, memory, accessibility, and quality reports.
+  - [x] Record the explicit Gate 2 decision: **HOLD**.
+  - [ ] Clear the source-security blockers in `tasks/t13-release-readiness.md`.
+  - [ ] Run hosted GitHub Actions for the exact candidate.
+  - [ ] Complete the VS Code visual, keyboard, and accessibility checklist.
 
 ## Implementation Tasks
 
@@ -99,11 +103,12 @@ Do not start product implementation until Gate 0 is complete. Check a task only 
   - [x] Pass clean wheel/sdist installs and offline runtime smoke tests.
 
 - [ ] **T13 - Compatibility matrix and final quality gate** (depends on T12)
-  - [ ] Add CI for lint, types, tests, build, artifacts, and coverage.
-  - [ ] Verify Python 3.12/3.13, VapourSynth baseline, and real Jupyter comms.
-  - [ ] Complete JupyterLab, Notebook 7, VS Code, Chromium, and Firefox checks.
-  - [ ] Run final performance, memory, accessibility, security, and code review.
-  - [ ] Complete G2 with an explicit release or hold decision.
+  - [x] Add and policy-test CI for lint, types, tests, build, artifacts, and coverage.
+  - [x] Verify Python 3.12/3.13, VapourSynth R77, and real Jupyter comms locally.
+  - [ ] Complete the host matrix; JupyterLab, Notebook 7, Chromium, and Firefox pass, while the VS Code manual checklist remains open.
+  - [x] Run final performance, memory, accessibility, security, and code review.
+  - [x] Complete the assessment with an explicit Gate 2 **HOLD** decision.
+  - [ ] Replace the source-owned guard with an independently trusted boundary and requalify an exact-tree candidate.
 
 ## Completion Rule
 
